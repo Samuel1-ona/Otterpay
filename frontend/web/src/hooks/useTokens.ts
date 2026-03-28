@@ -1,0 +1,133 @@
+import { useState, useCallback, useMemo } from 'react';
+import { useStarkZap } from '../providers/StarkZapProvider';
+import { Amount, Token, Address, getPresets, getTokensFromAddresses } from 'starkzap';
+
+/**
+ * Hook for core Token (ERC20) module operations (Web).
+ * Optimized for StarkPay: Automates Vesu withdrawals during transfers.
+ */
+export const useTokens = () => {
+  const { wallet } = useStarkZap();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  /**
+   * Available tokens for the current network (e.g., STRK, USDC).
+   * Automatically resolves based on the wallet's chainId.
+   */
+  const presets = useMemo(() => {
+    if (!wallet) return null;
+    try {
+      return getPresets(wallet.getChainId());
+    } catch (err) {
+      console.error('Failed to load token presets:', err);
+      return null;
+    }
+  }, [wallet]);
+
+  /**
+   * Resolve a token object from its contract address.
+   * Useful for dynamic/custom tokens not in presets.
+   */
+  const resolveToken = useCallback(async (address: Address) => {
+    if (!wallet) throw new Error('Wallet not connected');
+    setLoading(true);
+    try {
+      const tokens = await getTokensFromAddresses([address], wallet.getProvider());
+      return tokens[0];
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Failed to resolve token');
+      setError(error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet]);
+
+  /**
+   * Get the balance of a specific token.
+   */
+  const balanceOf = useCallback(async (token: Token) => {
+    if (!wallet) throw new Error('Wallet not connected');
+    setLoading(true);
+    setError(null);
+    try {
+      return await wallet.balanceOf(token);
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Failed to fetch balance');
+      setError(error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet]);
+
+  /**
+   * Send tokens to a recipient address.
+   * [Production Ready]: Explicit balance checks + Atomic batching with auto-withdrawal.
+   */
+  const send = useCallback(async (token: Token, to: Address, amount: string) => {
+    if (!wallet) throw new Error('Wallet not connected');
+    setLoading(true);
+    setError(null);
+    try {
+      const targetAmount = Amount.parse(amount, token);
+      
+      // Get current wallet balance and lending position to check total liquidity
+      const walletBalance = await wallet.balanceOf(token);
+      const position = await wallet.lending().getPosition({ 
+        collateralToken: token, 
+        debtToken: token 
+      });
+      
+      const totalLiquidityRaw = walletBalance.toBase() + (position.collateralAmount ?? 0n);
+      const totalLiquidity = Amount.fromRaw(totalLiquidityRaw, token);
+
+      if (totalLiquidity.lt(targetAmount)) {
+        throw new Error(`Insufficient total balance (Wallet + Vesu). Needed: ${targetAmount.toFormatted()}, Found: ${totalLiquidity.toFormatted()}`);
+      }
+
+      const builder = wallet.tx();
+
+      // If wallet balance is insufficient, withdraw the difference from Vesu
+      if (walletBalance.lt(targetAmount)) {
+        const diff = targetAmount.subtract(walletBalance);
+        
+        builder.lendWithdraw({
+          token,
+          amount: diff,
+        });
+      }
+
+      // Chain the transfer and send
+      const tx = await builder
+        .transfer(token, [{ to, amount: targetAmount }])
+        .send();
+
+      return tx;
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Transfer failed');
+      setError(error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet]);
+
+  /**
+   * Returns the wallet address for receiving funds.
+   */
+  const receive = useCallback(() => {
+    return wallet?.address;
+  }, [wallet]);
+
+  return {
+    presets,
+    resolveToken,
+    balanceOf,
+    send,
+    receive,
+    loading,
+    error,
+  };
+};
