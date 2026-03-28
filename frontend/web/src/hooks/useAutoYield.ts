@@ -22,7 +22,7 @@ export interface AutoYieldOptions {
 export const useAutoYield = ({
   wallet,
   supportedTokens,
-  pollIntervalMs = 15000, // Poll every 15 seconds by default
+  pollIntervalMs = 15000,
   onDepositSuccess,
   onDepositError,
 }: AutoYieldOptions) => {
@@ -52,7 +52,7 @@ export const useAutoYield = ({
           const eventsResponse = await provider.getEvents({
             address: token.address,
             from_block: { block_number: lastProcessedBlockRef.current + 1 },
-            to_block: 'pending',
+            to_block: 'latest',
             keys: [[TRANSFER_EVENT_SELECTOR], [], [num.toHex(currentAddress)]], // [Transfer, any_from, our_address]
             chunk_size: 10,
           });
@@ -70,7 +70,7 @@ export const useAutoYield = ({
             setIsDepositing(true);
             try {
               // The wallet.lending().supply() handles the paymaster gas sponsorship internally
-              const tx = await wallet.lending().supply(token, incomingAmount);
+              const tx = await wallet.lending().deposit({ token, amount: incomingAmount });
               
               console.log(`[AutoYield] Auto-deposit triggered: ${tx.hash}`);
               
@@ -87,7 +87,7 @@ export const useAutoYield = ({
 
           // Update last processed block based on the latest event block number
           if (eventsResponse.events.length > 0) {
-            const maxBlock = Math.max(...eventsResponse.events.map(e => e.block_number));
+            const maxBlock = Math.max(...eventsResponse.events.map(e => e.block_number || 0));
             lastProcessedBlockRef.current = maxBlock;
           }
         }
