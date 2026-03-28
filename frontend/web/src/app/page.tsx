@@ -2,9 +2,11 @@
 
 import React from 'react';
 import { useStarkZap } from '@/providers/StarkZapProvider';
+import { useDashboard } from '@/hooks/useDashboard';
 
 export default function Dashboard() {
-  const { wallet, isLoading, error } = useStarkZap();
+  const { wallet, connect } = useStarkZap();
+  const { assets, totalBalanceUsd, totalYieldUsd, history, loading, refresh } = useDashboard();
 
   return (
     <main className="flex-1 flex flex-col p-6 max-w-lg mx-auto w-full space-y-8">
@@ -14,7 +16,13 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold tracking-tight text-white">StarkPay</h1>
           <p className="text-zinc-400 text-sm">Yield-bearing payments</p>
         </div>
-        <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 shadow-lg shadow-indigo-500/20" />
+        <button 
+          onClick={refresh}
+          disabled={loading}
+          className={`p-2 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white transition-all ${loading ? 'animate-spin' : ''}`}
+        >
+          <RefreshIcon />
+        </button>
       </header>
 
       {/* Balance Card */}
@@ -23,18 +31,19 @@ export default function Dashboard() {
         <div className="relative">
           <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Total Balance</p>
           <div className="mt-2 flex items-baseline space-x-2">
-            <span className="text-5xl font-bold text-white">$ 0.00</span>
+            <span className="text-5xl font-bold text-white">
+              $ {totalBalanceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
             <span className="text-indigo-400 text-sm font-medium transition-all hover:scale-105 cursor-default">
-              + $0.00 today
+              + ${totalYieldUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} yield
             </span>
           </div>
-          <div className="mt-6 flex space-x-2">
-             <div className="px-3 py-1 rounded-full bg-zinc-800/50 border border-zinc-700/50 text-[10px] text-zinc-400">
-               0 STRK 
-             </div>
-             <div className="px-3 py-1 rounded-full bg-zinc-800/50 border border-zinc-700/50 text-[10px] text-zinc-400">
-               0 USDC
-             </div>
+          <div className="mt-6 flex flex-wrap gap-2">
+            {assets.map((asset) => (
+              <div key={asset.token.symbol} className="px-3 py-1 rounded-full bg-zinc-800/50 border border-zinc-700/50 text-[10px] text-zinc-300">
+                {asset.walletBalance.add(asset.lendingBalance).toFormatted(true)} {asset.token.symbol}
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -59,19 +68,55 @@ export default function Dashboard() {
       <section className="space-y-4">
         <h3 className="text-sm font-semibold text-zinc-400 px-1">Yield Performance</h3>
         <div className="rounded-2xl bg-zinc-900/50 border border-zinc-800 p-4 flex items-center justify-between">
-          <div className="flex items-center space-y-1">
+          <div className="flex items-center">
              <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 mr-3">
                <TrendingUpIcon />
              </div>
              <div>
                <p className="text-xs text-zinc-500 leading-none">Net APY</p>
-               <p className="text-sm font-semibold text-emerald-400">12.4%</p>
+               <p className="text-sm font-semibold text-emerald-400 mt-1">12.4%</p>
              </div>
           </div>
           <div className="text-right">
             <p className="text-xs text-zinc-500 mb-1">Supplied in Vesu</p>
-            <p className="text-sm font-medium text-white">$ 0.00</p>
+            <p className="text-sm font-medium text-white">$ {totalYieldUsd.toFixed(2)}</p>
           </div>
+        </div>
+      </section>
+
+      {/* Recent Activity */}
+      <section className="space-y-4">
+        <h3 className="text-sm font-semibold text-zinc-400 px-1">Recent Activity</h3>
+        <div className="rounded-2xl bg-zinc-900/50 border border-zinc-800 overflow-hidden">
+          {history.length === 0 ? (
+            <div className="p-8 text-center text-zinc-500 text-sm">No recent transactions</div>
+          ) : (
+            <div className="divide-y divide-zinc-800/50">
+              {history.slice(0, 5).map((item) => (
+                <div key={item.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/20 transition-colors">
+                  <div className="flex items-center">
+                    <div className={`p-2 rounded-full mr-3 ${item.type === 'received' || item.type === 'deposit' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                      {item.type === 'received' ? <ArrowDownIcon /> : item.type === 'sent' ? <ArrowUpIcon /> : <HistoryIcon />}
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-zinc-200 uppercase tracking-tighter">{item.type}</p>
+                      <p className="text-[10px] text-zinc-500 font-mono mt-0.5">{item.txHash.slice(0, 10)}...</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className={`text-sm font-bold ${item.type === 'received' || item.type === 'deposit' ? 'text-emerald-400' : 'text-white'}`}>
+                      {item.type === 'received' || item.type === 'deposit' ? '+' : '-'}{item.amount.toFormatted(true)}
+                    </p>
+                    {item.timestamp && (
+                       <p className="text-[10px] text-zinc-500 mt-0.5">
+                         {new Date(item.timestamp * 1000).toLocaleDateString()}
+                       </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -80,14 +125,14 @@ export default function Dashboard() {
         {!wallet ? (
           <button 
             className="w-full py-4 rounded-xl bg-white text-black font-bold text-sm shadow-xl shadow-white/10 active:scale-98 transition-all hover:bg-zinc-200"
-            onClick={() => {/* Trigger connect flow */}}
+            onClick={() => connect('dummy_token')}
           >
             Connect with Social Login
           </button>
         ) : (
           <div className="flex items-center justify-center space-x-2 text-zinc-500 text-xs font-mono">
             <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Connected: {(wallet as any).account.address.slice(0, 6)}...{(wallet as any).account.address.slice(-4)}</span>
+            <span>Connected: {wallet.address.slice(0, 6)}...{wallet.address.slice(-4)}</span>
           </div>
         )}
       </footer>
@@ -116,6 +161,38 @@ function TrendingUpIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+    </svg>
+  );
+}
+
+function ArrowDownIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19" /><polyline points="19 12 12 19 5 12" />
+    </svg>
+  );
+}
+
+function ArrowUpIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" />
+    </svg>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
     </svg>
   );
 }

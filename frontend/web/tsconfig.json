@@ -18,8 +18,12 @@
         "name": "next"
       }
     ],
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "ethers": ["./src/ethers-shim.js"],
+      "ethers/lib/utils": ["./node_modules/ethers-v5/lib/utils"],
+      "ethers/lib/signer": ["./node_modules/ethers-v5/lib/signer"]
     }
   },
   "include": [

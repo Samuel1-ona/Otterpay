@@ -1,16 +1,27 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStarkZap } from '@/providers/StarkZapProvider';
+import { useDashboard } from '@/hooks/useDashboard';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
 export default function HomeScreen() {
   const { wallet, connect } = useStarkZap();
+  const { totalBalanceUsd, totalYieldUsd, assets, loading, refresh, history } = useDashboard();
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl 
+            refreshing={loading && assets.length > 0} 
+            onRefresh={refresh} 
+            tintColor="#fff"
+          />
+        }
+      >
         {/* Header */}
         <View style={styles.header}>
           <View>
@@ -20,10 +31,6 @@ export default function HomeScreen() {
           <View style={styles.profileCircle} />
         </View>
 
-        {/* Balance Card ... */}
-        {/* Skipping middle for conciseness in thought but tool will replace correctly */}
-        {/* Actually I'll just show the specific lines */}
-
         {/* Balance Card */}
         <LinearGradient
           colors={['#18181b', '#09090b']}
@@ -31,13 +38,18 @@ export default function HomeScreen() {
         >
           <Text style={styles.balanceLabel}>TOTAL BALANCE</Text>
           <View style={styles.balanceRow}>
-            <Text style={styles.balanceText}>$ 0.00</Text>
-            <Text style={styles.yieldText}>+ $0.00</Text>
+            <Text style={styles.balanceText}>$ {totalBalanceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+            <Text style={styles.yieldText}>+ ${totalYieldUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
           </View>
           
           <View style={styles.tokenBadges}>
-            <View style={styles.badge}><Text style={styles.badgeText}>0 STRK</Text></View>
-            <View style={styles.badge}><Text style={styles.badgeText}>0 USDC</Text></View>
+            {assets.map((asset) => (
+              <View key={asset.token.symbol} style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {asset.walletBalance.add(asset.lendingBalance).toFormatted(true)} {asset.token.symbol}
+                </Text>
+              </View>
+            ))}
           </View>
         </LinearGradient>
 
@@ -76,8 +88,38 @@ export default function HomeScreen() {
            <View style={styles.verticalDivider} />
            <View>
              <Text style={[styles.yieldInfoLabel, { textAlign: 'right' }]}>Supplied</Text>
-             <Text style={[styles.yieldInfoValue, { textAlign: 'right' }]}>$ 0.00</Text>
+             <Text style={[styles.yieldInfoValue, { textAlign: 'right' }]}>$ {totalYieldUsd.toFixed(2)}</Text>
            </View>
+        </View>
+
+        {/* Transaction History */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Recent Activity</Text>
+        </View>
+
+        <View style={styles.historyCard}>
+          {history.length === 0 ? (
+            <Text style={styles.emptyHistoryText}>No recent transactions</Text>
+          ) : (
+            history.slice(0, 5).map((item) => (
+              <View key={item.id} style={styles.historyItem}>
+                <View style={[styles.historyIcon, { backgroundColor: item.type === 'received' || item.type === 'deposit' ? '#10b98120' : '#ef444420' }]}>
+                  <Ionicons 
+                    name={item.type === 'received' ? 'arrow-down' : item.type === 'sent' ? 'arrow-up' : 'swap-horizontal'} 
+                    size={16} 
+                    color={item.type === 'received' || item.type === 'deposit' ? '#10b981' : '#ef4444'} 
+                  />
+                </View>
+                <View style={styles.historyInfo}>
+                  <Text style={styles.historyType}>{item.type.toUpperCase()}</Text>
+                  <Text style={styles.historyHash}>{item.txHash.slice(0, 10)}...</Text>
+                </View>
+                <Text style={[styles.historyAmount, { color: item.type === 'received' || item.type === 'deposit' ? '#10b981' : '#fff' }]}>
+                  {item.type === 'received' || item.type === 'deposit' ? '+' : '-'}{item.amount.toFormatted(true)}
+                </Text>
+              </View>
+            ))
+          )}
         </View>
 
         {/* Wallet Connection */}
@@ -288,5 +330,50 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#71717a',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  historyCard: {
+    backgroundColor: '#09090b80',
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#27272a',
+  },
+  emptyHistoryText: {
+    color: '#71717a',
+    fontSize: 14,
+    textAlign: 'center',
+    padding: 20,
+  },
+  historyItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    gap: 16,
+  },
+  historyIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  historyInfo: {
+    flex: 1,
+  },
+  historyType: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#d4d4d8',
+    letterSpacing: 0.5,
+  },
+  historyHash: {
+    fontSize: 12,
+    color: '#71717a',
+    marginTop: 2,
+  },
+  historyAmount: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
   },
 });
