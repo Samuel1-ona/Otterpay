@@ -13,6 +13,8 @@
     "@hyperlane-xyz/registry": "^19.4.0",
     "@hyperlane-xyz/sdk": "^14.4.0",
     "@hyperlane-xyz/utils": "^14.4.0",
+    "@privy-io/node": "^0.11.0",
+    "@privy-io/react-auth": "^3.18.0",
     "@solana/web3.js": "^1.98.4",
     "ethers": "^6.16.0",
     "ethers-v5": "npm:ethers@^5.7.2",

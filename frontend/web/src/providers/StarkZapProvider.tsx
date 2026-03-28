@@ -71,18 +71,21 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
         strategy: 'privy',
         privy: {
           resolve: async () => {
-            // This is a placeholder for the backend integration described in the architecture
-            const response = await fetch('/api/wallet/starknet', {
+            const response = await fetch('/api/privy/wallet', {
               method: 'POST',
               headers: {
+                'Content-Type': 'application/json',
                 Authorization: `Bearer ${accessToken}`,
               },
+              body: JSON.stringify({ userId: 'social-user' }) // we'll use a fixed ID or get from privy token later
             });
-            const { wallet: privyWallet } = await response.json();
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to get Privy wallet');
+            const { wallet: privyWallet } = data;
             return {
               walletId: privyWallet.id,
               publicKey: privyWallet.publicKey,
-              serverUrl: '/api/wallet/sign',
+              serverUrl: '/api/privy/sign',
             };
           },
         },

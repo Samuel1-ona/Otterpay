@@ -1,12 +1,42 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useStarkZap } from '@/providers/StarkZapProvider';
 import { useDashboard } from '@/hooks/useDashboard';
+import { usePrivy } from '@privy-io/react-auth';
 
 export default function Dashboard() {
-  const { wallet, connect } = useStarkZap();
+  const { wallet, connect, isLoading: isConnecting } = useStarkZap();
   const { assets, totalBalanceUsd, totalYieldUsd, history, loading, refresh } = useDashboard();
+  const { login, logout, authenticated, user, getAccessToken, ready } = usePrivy();
+
+  useEffect(() => {
+    const syncWallet = async () => {
+      if (ready && authenticated && user && !wallet && !isConnecting) {
+        try {
+          const token = await getAccessToken();
+          if (token) {
+            await connect(token);
+          }
+        } catch (err) {
+          console.error('Failed to sync Privy wallet with StarkZap:', err);
+        }
+      }
+    };
+
+    syncWallet();
+  }, [ready, authenticated, user, wallet, isConnecting, connect, getAccessToken]);
+
+  const handleConnect = async () => {
+    if (!authenticated) {
+      login();
+    } else {
+      const token = await getAccessToken();
+      if (token) {
+        await connect(token);
+      }
+    }
+  };
 
   return (
     <main className="flex-1 flex flex-col p-6 max-w-lg mx-auto w-full space-y-8">
@@ -16,13 +46,23 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold tracking-tight text-white">StarkPay</h1>
           <p className="text-zinc-400 text-sm">Yield-bearing payments</p>
         </div>
-        <button 
-          onClick={refresh}
-          disabled={loading}
-          className={`p-2 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white transition-all ${loading ? 'animate-spin' : ''}`}
-        >
-          <RefreshIcon />
-        </button>
+        <div className="flex items-center space-x-2">
+          {authenticated && (
+            <button 
+              onClick={logout}
+              className="text-[10px] font-bold text-zinc-500 hover:text-red-400 transition-colors uppercase tracking-tighter"
+            >
+              Logout
+            </button>
+          )}
+          <button 
+            onClick={refresh}
+            disabled={loading}
+            className={`p-2 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white transition-all ${loading ? 'animate-spin' : ''}`}
+          >
+            <RefreshIcon />
+          </button>
+        </div>
       </header>
 
       {/* Balance Card */}
@@ -124,10 +164,11 @@ export default function Dashboard() {
       <footer className="mt-auto py-8">
         {!wallet ? (
           <button 
-            className="w-full py-4 rounded-xl bg-white text-black font-bold text-sm shadow-xl shadow-white/10 active:scale-98 transition-all hover:bg-zinc-200"
-            onClick={() => connect('dummy_token')}
+            className="w-full py-4 rounded-xl bg-white text-black font-bold text-sm shadow-xl shadow-white/10 active:scale-98 transition-all hover:bg-zinc-200 disabled:opacity-50"
+            disabled={!ready || isConnecting}
+            onClick={handleConnect}
           >
-            Connect with Social Login
+            {isConnecting ? 'Setting up wallet...' : 'Connect with Social Login'}
           </button>
         ) : (
           <div className="flex items-center justify-center space-x-2 text-zinc-500 text-xs font-mono">

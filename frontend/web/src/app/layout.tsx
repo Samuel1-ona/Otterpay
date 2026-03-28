@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import PrivyProvider from "@/providers/PrivyProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,9 +31,11 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <StarkZapProvider network="sepolia">
-          {children}
-        </StarkZapProvider>
+        <PrivyProvider>
+          <StarkZapProvider network="sepolia">
+            {children}
+          </StarkZapProvider>
+        </PrivyProvider>
       </body>
     </html>
   );
