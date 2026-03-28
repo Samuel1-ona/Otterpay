@@ -74,10 +74,16 @@ export const useTokens = () => {
       const targetAmount = Amount.parse(amount, token);
       
       // Get current wallet balance and lending position to check total liquidity
+      const ethAddress = '0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7';
+      const usdcAddress = '0x053c9125369e0151fbc37828196ed33c094b9d05b7f0300d3914966e53401777';
+      const debtToken = token.address === ethAddress
+        ? { address: usdcAddress, symbol: 'USDC', decimals: 6 } as Token
+        : { address: ethAddress, symbol: 'ETH', decimals: 18 } as Token;
+
       const walletBalance = await wallet.balanceOf(token);
       const position = await wallet.lending().getPosition({ 
         collateralToken: token, 
-        debtToken: token 
+        debtToken: debtToken
       });
       
       const totalLiquidityRaw = walletBalance.toBase() + (position.collateralAmount ?? 0n);

@@ -29,10 +29,14 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
         <PrivyProvider>
-          <StarkZapProvider network="sepolia">
+          <StarkZapProvider 
+            network="sepolia" 
+            avnuApiKey={process.env.NEXT_PUBLIC_AVNU_API_KEY}
+          >
             {children}
           </StarkZapProvider>
         </PrivyProvider>

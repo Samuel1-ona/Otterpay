@@ -3,7 +3,7 @@ import { useStarkZap } from '../providers/StarkZapProvider';
 import { useTokens } from './useTokens';
 import { useLending } from './useLending';
 import { useHistory } from './useHistory';
-import { Amount, Token } from 'starkzap';
+import { Amount, Token, LendingUserPosition } from 'starkzap';
 
 export interface DashboardAsset {
   token: Token;
@@ -16,7 +16,7 @@ export interface DashboardAsset {
 export const useDashboard = () => {
   const { wallet } = useStarkZap();
   const { presets, balanceOf } = useTokens();
-  const { getPosition } = useLending();
+  const { getPosition, getPositions } = useLending();
   
   const tokenList = useMemo(() => presets ? Object.values(presets) : [], [presets]);
   const { history, refresh: refreshHistory, loading: historyLoading } = useHistory(tokenList);
@@ -35,6 +35,20 @@ export const useDashboard = () => {
 
     try {
       const tokens = Object.values(presets);
+      
+      // Fetch ALL positions once instead of per-token to avoid identical-assets errors
+      const allPositions = await getPositions();
+      const positionMap = new Map<string, { amount: bigint, usdValue: number }>();
+      
+      (allPositions || []).forEach((p: LendingUserPosition) => {
+        const addr = p.collateral.token.address.toLowerCase();
+        const existing = positionMap.get(addr) || { amount: 0n, usdValue: 0 };
+        positionMap.set(addr, {
+          amount: existing.amount + p.collateral.amount,
+          usdValue: existing.usdValue + (Number(p.collateral.usdValue || 0n) / 1e18)
+        });
+      });
+
       const results: DashboardAsset[] = [];
       let totalUsd = 0;
       let yieldUsd = 0;
@@ -43,26 +57,20 @@ export const useDashboard = () => {
         // Fetch wallet balance
         const wBalance = await balanceOf(token);
         
-        // Fetch lending position
-        let lBalance = Amount.fromRaw(0n, token);
-        let tokenUsd = 0;
+        // Find corresponding lending position from our map
+        const pos = positionMap.get(token.address.toLowerCase());
+        const lBalance = pos ? Amount.fromRaw(pos.amount, token) : Amount.fromRaw(0n, token);
+        const collateralUsdValue = pos ? pos.usdValue : 0;
         
-        try {
-          const position = await getPosition(token);
-          if (position.collateralAmount) {
-            lBalance = Amount.fromRaw(position.collateralAmount, token);
-          }
-          
-          const collateralUsdValue = Number(position.collateralValue) / 1e18;
-          tokenUsd += collateralUsdValue;
-          yieldUsd += collateralUsdValue; 
-          
-          if (position.collateralAmount && position.collateralAmount > 0n) {
-             const price = Number(position.collateralValue) / Number(position.collateralAmount);
-             tokenUsd += (Number(wBalance.toBase()) * price) / 1e18;
-          }
-        } catch (e) {
-          console.warn(`Failed to fetch position for ${token.symbol}`, e);
+        let tokenUsd = collateralUsdValue;
+        yieldUsd += collateralUsdValue; 
+        
+        // Use an estimated price from the collateral if available, or fallback to simple USD balance
+        if (pos && pos.amount > 0n) {
+           const price = pos.usdValue / Number(Amount.fromRaw(pos.amount, token).toBase());
+           tokenUsd += Number(wBalance.toBase()) * price;
+        } else {
+           // Fallback or simple balance logic
         }
 
         results.push({
@@ -85,7 +93,7 @@ export const useDashboard = () => {
     } finally {
       setLoading(false);
     }
-  }, [wallet, presets, balanceOf, getPosition, refreshHistory]);
+  }, [wallet, presets, balanceOf, getPositions, refreshHistory]);
 
   useEffect(() => {
     fetchData();

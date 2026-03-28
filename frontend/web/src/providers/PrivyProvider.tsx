@@ -4,8 +4,7 @@ import { PrivyProvider as BasePrivyProvider } from "@privy-io/react-auth";
 import { ReactNode } from "react";
 
 export default function PrivyProvider({ children }: { children: ReactNode }) {
-  // Using the App ID provided by the user in .env
-  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID || "client-WY6WjKEDLRQDLNC51jntyddRj5R9cmHPo7aLbTwcn4Re1";
+  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID || "";
 
   return (
     <BasePrivyProvider

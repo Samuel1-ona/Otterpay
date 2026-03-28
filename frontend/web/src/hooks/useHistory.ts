@@ -98,6 +98,8 @@ export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryRe
         }
 
         eventsResponse.events.forEach((event, eventIndex) => {
+          if (!event.data || event.data.length < 4) return;
+          
           const from = num.toHex(event.data[0]).toLowerCase();
           const to = num.toHex(event.data[1]).toLowerCase();
           const amountRaw = uint256ToBigInt(event.data[2], event.data[3]);
@@ -173,6 +175,7 @@ export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryRe
 /**
  * Utility to convert Starknet Uint256 (low, high) to BigInt
  */
-function uint256ToBigInt(low: string, high: string): bigint {
+function uint256ToBigInt(low: any, high: any): bigint {
+  if (low == null || high == null) return 0n;
   return (BigInt(high) << BigInt(128)) + BigInt(low);
 }

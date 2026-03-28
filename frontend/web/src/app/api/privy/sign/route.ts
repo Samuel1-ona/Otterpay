@@ -1,9 +1,8 @@
 import { PrivyClient } from "@privy-io/node";
 import { NextResponse } from "next/server";
 
-// Note: Using the user's specific env var names from .env
-const PRIVY_APP_ID = process.env.SPAY_PRIVY;
-const PRIVY_APP_SECRET = process.env.PRIVY_APP_ID;
+const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+const PRIVY_APP_SECRET = process.env.PRIVY_APP_SECRET;
 
 const privy = new PrivyClient({
   appId: PRIVY_APP_ID!,
@@ -18,12 +17,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "walletId and hash are required" }, { status: 400 });
     }
 
-    // Sign the hash using Privy's rawSign
-    const result = await privy.wallets().rawSign(walletId, {
-        hash,
+    // Note: The Node SDK uses _rawSign according to the type definitions
+    const result = await privy.wallets()._rawSign(walletId, {
+        params: {
+            hash,
+        },
     });
 
-    return NextResponse.json({ signature: result.signature });
+    return NextResponse.json({ signature: result.data.signature });
   } catch (error: any) {
     console.error("Privy Sign Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });

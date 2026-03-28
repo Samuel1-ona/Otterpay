@@ -1,9 +1,8 @@
 import { PrivyClient } from "@privy-io/node";
 import { NextResponse } from "next/server";
 
-// Note: Using the user's specific env var names from .env
-const PRIVY_APP_ID = process.env.SPAY_PRIVY; // client-xxxx
-const PRIVY_APP_SECRET = process.env.PRIVY_APP_ID; // starts with privy_app_secret_
+const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+const PRIVY_APP_SECRET = process.env.PRIVY_APP_SECRET;
 
 const privy = new PrivyClient({
   appId: PRIVY_APP_ID!,
@@ -12,14 +11,6 @@ const privy = new PrivyClient({
 
 export async function POST(req: Request) {
   try {
-    // In a production app, you would verify the Privy access token here:
-    // const header = req.headers.get("authorization");
-    // const authToken = header?.replace("Bearer ", "");
-    // const verifiedClaims = await privy.verifyAuthToken(authToken!);
-    // const userId = verifiedClaims.userId;
-
-    // For this implementation, we'll use a placeholder or extract from body if needed
-    // The StarkZap docs suggest getting the wallet for a specific user.
     const { userId } = await req.json();
 
     if (!userId) {
@@ -29,14 +20,14 @@ export async function POST(req: Request) {
     // Check if wallet exists or create one
     // Note: Privy's create wallet is idempotent if you use the same user_id and chain_type
     const wallet = await privy.wallets().create({
-      chainType: "starknet",
+      chain_type: "starknet",
     });
 
     return NextResponse.json({ 
       wallet: {
         id: wallet.id,
         address: wallet.address,
-        publicKey: wallet.publicKey
+        publicKey: wallet.public_key
       }
     });
   } catch (error: any) {

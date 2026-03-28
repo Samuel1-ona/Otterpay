@@ -15,8 +15,8 @@ export default function Dashboard() {
       if (ready && authenticated && user && !wallet && !isConnecting) {
         try {
           const token = await getAccessToken();
-          if (token) {
-            await connect(token);
+          if (token && user) {
+            await connect(token, user.id);
           }
         } catch (err) {
           console.error('Failed to sync Privy wallet with StarkZap:', err);
@@ -32,8 +32,8 @@ export default function Dashboard() {
       login();
     } else {
       const token = await getAccessToken();
-      if (token) {
-        await connect(token);
+      if (token && user) {
+        await connect(token, user.id);
       }
     }
   };
@@ -80,7 +80,7 @@ export default function Dashboard() {
           </div>
           <div className="mt-6 flex flex-wrap gap-2">
             {assets.map((asset) => (
-              <div key={asset.token.symbol} className="px-3 py-1 rounded-full bg-zinc-800/50 border border-zinc-700/50 text-[10px] text-zinc-300">
+              <div key={asset.token.address} className="px-3 py-1 rounded-full bg-zinc-800/50 border border-zinc-700/50 text-[10px] text-zinc-300">
                 {asset.walletBalance.add(asset.lendingBalance).toFormatted(true)} {asset.token.symbol}
               </div>
             ))}
