@@ -4,11 +4,21 @@ import React, { useEffect } from 'react';
 import { useStarkZap } from '@/providers/StarkZapProvider';
 import { useDashboard } from '@/hooks/useDashboard';
 import { usePrivy } from '@privy-io/react-auth';
+import { useAutoYield } from '@/hooks/useAutoYield';
 
 export default function Dashboard() {
   const { wallet, connect, isLoading: isConnecting } = useStarkZap();
-  const { assets, totalBalanceUsd, totalYieldUsd, history, loading, refresh } = useDashboard();
+  const { assets, totalBalanceUsd, totalYieldUsd, history, loading, refresh, supportedTokens } = useDashboard();
   const { login, logout, authenticated, user, getAccessToken, ready } = usePrivy();
+
+  const { isDepositing: isAutoYielding } = useAutoYield({
+    wallet,
+    supportedTokens,
+    onDepositSuccess: (token, amount) => {
+      console.log(`Successfully auto-deposited ${amount.toFormatted()} ${token.symbol}`);
+      refresh();
+    }
+  });
 
   useEffect(() => {
     const syncWallet = async () => {
@@ -47,6 +57,12 @@ export default function Dashboard() {
           <p className="text-zinc-400 text-sm">Yield-bearing payments</p>
         </div>
         <div className="flex items-center space-x-2">
+          {isAutoYielding && (
+            <div className="flex items-center space-x-1.5 px-2 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20">
+              <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-tighter">Yielding...</span>
+            </div>
+          )}
           {authenticated && (
             <button 
               onClick={logout}

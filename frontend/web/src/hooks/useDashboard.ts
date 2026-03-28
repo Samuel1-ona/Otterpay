@@ -107,5 +107,6 @@ export const useDashboard = () => {
     loading: loading || historyLoading,
     error,
     refresh: fetchData,
+    supportedTokens: tokenList,
   };
 };
