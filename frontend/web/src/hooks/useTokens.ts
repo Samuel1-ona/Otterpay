@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useStarkZap } from '../providers/StarkZapProvider';
-import { Amount, Token, Address, getPresets, getTokensFromAddresses } from 'starkzap';
+import { Amount, Token, Address, getPresets, getTokensFromAddresses, LendingPosition } from 'starkzap';
 
 /**
  * Hook for core Token (ERC20) module operations (Web).
@@ -84,10 +84,16 @@ export const useTokens = () => {
         : { address: ethAddress, symbol: 'ETH', decimals: 18 } as Token;
 
       const walletBalance = await wallet.balanceOf(token);
-      const position = await wallet.lending().getPosition({ 
-        collateralToken: token, 
-        debtToken: debtToken
-      });
+      let position: Partial<LendingPosition> = { collateralAmount: 0n };
+      
+      try {
+        position = await wallet.lending().getPosition({ 
+          collateralToken: token, 
+          debtToken: debtToken
+        });
+      } catch (e) {
+        console.warn(`[useTokens] Lending position query failed for ${token.symbol}. Proceeding with wallet balance only.`, e);
+      }
       
       const totalLiquidityRaw = walletBalance.toBase() + (position.collateralAmount ?? 0n);
       const totalLiquidity = Amount.fromRaw(totalLiquidityRaw, token);

@@ -45,8 +45,7 @@ export default function Dashboard() {
         try {
           const token = await getAccessToken();
           if (token && user) {
-            const overrideAddress = process.env.NEXT_PUBLIC_STARKNET_ADDRESS;
-            await connect(token, user.id, overrideAddress);
+            await connect(token, user.id);
           }
         } catch (err) {
           console.error('Failed to sync Privy wallet with StarkZap:', err);
@@ -63,8 +62,7 @@ export default function Dashboard() {
     } else {
       const token = await getAccessToken();
       if (token && user) {
-        const overrideAddress = process.env.NEXT_PUBLIC_STARKNET_ADDRESS;
-        await connect(token, user.id, overrideAddress);
+        await connect(token, user.id);
       }
     }
   };
