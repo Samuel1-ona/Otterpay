@@ -1,10 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useStarkZap } from '../providers/StarkZapProvider';
-import { Amount, Token, Address } from 'starkzap';
+import { Amount, Token, Address, fromAddress } from 'starkzap';
 import { hash, num } from 'starknet';
 
 // ERC20 Transfer event selector
 const TRANSFER_EVENT_SELECTOR = hash.getSelectorFromName('Transfer');
+const HISTORY_BLOCK_WINDOW = 20_000;
+const MAX_WINDOWS_PER_FETCH = 8;
+const EVENTS_CHUNK_SIZE = 100;
 
 export interface HistoryItem {
   id: string;
@@ -33,39 +36,55 @@ export interface UseHistoryResult {
  * Fetches cross-token transaction history with pagination and Vesu categorization.
  */
 export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryResult => {
-  const { wallet, sdk } = useStarkZap();
+  const { wallet } = useStarkZap();
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const tokenCount = tokens.length;
+  const tokenAddressesKey = useMemo(
+    () => tokens.map((token) => token.address.toLowerCase()).sort().join(','),
+    [tokens]
+  );
+  const tokenMap = useMemo(() => {
+    const map = new Map<string, Token>();
+    tokens.forEach((token) => {
+      map.set(num.toBigInt(token.address).toString(), token);
+    });
+    return map;
+  }, [tokens]);
   
   // Pagination and State Tracking
-  const continuationTokensRef = useRef<Record<string, string | undefined>>({});
+  const oldestFetchedBlockRef = useRef<number | null>(null);
   const [hasMore, setHasMore] = useState(false);
-  const vTokenMapRef = useRef<Record<string, Address>>({}); // Pool addresses for categorization
+  const vTokenMapRef = useRef<Record<string, Address>>({});
 
   /**
    * Resolve Lending Pool addresses for categorization
    */
   const resolveLendingMarkets = useCallback(async () => {
-    if (!sdk || !wallet || tokens.length === 0) return;
+    if (!wallet || tokenCount === 0) {
+      vTokenMapRef.current = {};
+      return;
+    }
     try {
       const markets = await wallet.lending().getMarkets();
       const map: Record<string, Address> = {};
       markets.forEach(m => {
+        map[m.vTokenAddress.toLowerCase()] = m.asset.address.toLowerCase() as Address;
         map[m.poolAddress.toLowerCase()] = m.asset.address.toLowerCase() as Address;
       });
       vTokenMapRef.current = map;
     } catch (err) {
       console.warn('[useHistory] Failed to resolve lending markets for categorization:', err);
     }
-  }, [sdk, tokens]);
+  }, [wallet, tokenCount]);
 
   /**
    * Fetch a chunk of events
    */
   const fetchChunk = useCallback(async (isNextPage: boolean = false) => {
-    if (!wallet || tokens.length === 0) return;
+    if (!wallet || tokenCount === 0) return;
 
     if (isNextPage) setLoading(true);
     else setRefreshing(true);
@@ -74,59 +93,93 @@ export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryRe
 
     try {
       const provider = wallet.getProvider();
-      const currentAddress = wallet.address.toLowerCase();
+      const currentAddress = normalizeAddress(wallet.address);
+      const currentAddressKey = num.toHex(wallet.address);
+      const latestBlock = await provider.getBlock('latest');
+      let scanToBlock = isNextPage && oldestFetchedBlockRef.current != null
+        ? oldestFetchedBlockRef.current
+        : latestBlock.block_number;
       const newItems: HistoryItem[] = [];
-      let anyMore = false;
+      const seenEvents = new Set<string>();
+      const queryPlans = [
+        {
+          keys: [[TRANSFER_EVENT_SELECTOR], [], [currentAddressKey]],
+        },
+        {
+          keys: [[TRANSFER_EVENT_SELECTOR], [currentAddressKey]],
+        },
+      ] as const;
+      let windowsScanned = 0;
 
-      for (const token of tokens) {
-        const tokenAddr = token.address.toLowerCase();
-        
-        const eventsResponse = await provider.getEvents({
-          address: token.address,
-          keys: [[TRANSFER_EVENT_SELECTOR]],
-          from_block: { block_number: 0 },
-          to_block: 'latest',
-          chunk_size: pageSize,
-          continuation_token: isNextPage ? continuationTokensRef.current[tokenAddr] : undefined,
-        });
+      while (scanToBlock >= 0 && windowsScanned < MAX_WINDOWS_PER_FETCH) {
+        const scanFromBlock = Math.max(0, scanToBlock - HISTORY_BLOCK_WINDOW + 1);
 
-        if (eventsResponse.continuation_token) {
-          continuationTokensRef.current[tokenAddr] = eventsResponse.continuation_token;
-          anyMore = true;
-        } else {
-          continuationTokensRef.current[tokenAddr] = undefined;
+        for (const plan of queryPlans) {
+          let continuationToken: string | undefined;
+
+          do {
+            const eventsResponse = await provider.getEvents({
+              keys: plan.keys,
+              from_block: { block_number: scanFromBlock },
+              to_block: { block_number: scanToBlock },
+              chunk_size: EVENTS_CHUNK_SIZE,
+              continuation_token: continuationToken,
+            });
+
+            eventsResponse.events.forEach((event, eventIndex) => {
+              const token = tokenMap.get(num.toBigInt(event.from_address).toString());
+              if (!token) return;
+
+              const dedupeKey = `${event.transaction_hash}:${event.block_number}:${event.from_address}:${event.keys?.join(',')}:${event.data?.join(',')}`;
+              if (seenEvents.has(dedupeKey)) return;
+              seenEvents.add(dedupeKey);
+
+              const from = getTransferParticipant(event, 'from');
+              const to = getTransferParticipant(event, 'to');
+              if (!from || !to) return;
+
+              const amountRaw = getTransferAmount(event);
+              if (amountRaw === 0n) return;
+
+              if (from !== currentAddress && to !== currentAddress) return;
+
+              let type: HistoryItem['type'] = from === currentAddress ? 'sent' : 'received';
+              const counterparty = from === currentAddress ? to : from;
+
+              if (vTokenMapRef.current[to]) {
+                type = 'deposit';
+              } else if (vTokenMapRef.current[from]) {
+                type = 'withdrawal';
+              }
+
+              newItems.push({
+                id: `${event.transaction_hash}_${event.block_number}_${eventIndex}_${type}`,
+                type,
+                token,
+                amount: Amount.fromRaw(amountRaw, token),
+                blockNumber: event.block_number || 0,
+                txHash: event.transaction_hash,
+                counterparty,
+              });
+            });
+
+            continuationToken = eventsResponse.continuation_token;
+          } while (continuationToken);
         }
 
-        eventsResponse.events.forEach((event, eventIndex) => {
-          if (!event.data || event.data.length < 4) return;
-          
-          const from = num.toHex(event.data[0]).toLowerCase();
-          const to = num.toHex(event.data[1]).toLowerCase();
-          const amountRaw = uint256ToBigInt(event.data[2], event.data[3]);
-          
-          // Filter only relevant transfers for this user
-          if (from !== currentAddress && to !== currentAddress) return;
+        if (newItems.length >= pageSize) {
+          oldestFetchedBlockRef.current = scanFromBlock > 0 ? scanFromBlock - 1 : -1;
+          break;
+        }
 
-          let type: HistoryItem['type'] = from === currentAddress ? 'sent' : 'received';
-          let counterparty = from === currentAddress ? to : from;
+        if (scanFromBlock === 0) {
+          oldestFetchedBlockRef.current = -1;
+          break;
+        }
 
-          // Categorize Lending Actions (Vesu)
-          if (vTokenMapRef.current[to]) {
-            type = 'deposit';
-          } else if (vTokenMapRef.current[from]) {
-            type = 'withdrawal';
-          }
-
-          newItems.push({
-            id: `${event.transaction_hash}_${event.block_number}_${eventIndex}_${type}`,
-            type,
-            token,
-            amount: Amount.fromRaw(amountRaw, token),
-            blockNumber: event.block_number || 0,
-            txHash: event.transaction_hash,
-            counterparty,
-          });
-        });
+        scanToBlock = scanFromBlock - 1;
+        oldestFetchedBlockRef.current = scanToBlock;
+        windowsScanned += 1;
       }
 
       setHistory(prev => {
@@ -136,7 +189,7 @@ export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryRe
         return unique.sort((a, b) => b.blockNumber - a.blockNumber);
       });
       
-      setHasMore(anyMore);
+      setHasMore((oldestFetchedBlockRef.current ?? -1) >= 0);
     } catch (err) {
       console.error('[useHistory] Fetch error:', err);
       setError(err instanceof Error ? err : new Error('Failed to fetch history'));
@@ -144,10 +197,10 @@ export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryRe
       setLoading(false);
       setRefreshing(false);
     }
-  }, [wallet, tokens, pageSize]);
+  }, [wallet, tokenCount, tokenMap, pageSize]);
 
   const refresh = useCallback(async () => {
-    continuationTokensRef.current = {};
+    oldestFetchedBlockRef.current = null;
     await resolveLendingMarkets();
     await fetchChunk(false);
   }, [fetchChunk, resolveLendingMarkets]);
@@ -158,8 +211,15 @@ export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryRe
   }, [hasMore, loading, fetchChunk]);
 
   useEffect(() => {
+    if (!wallet || tokenCount === 0) {
+      setHistory([]);
+      setHasMore(false);
+      oldestFetchedBlockRef.current = null;
+      return;
+    }
+
     refresh();
-  }, [wallet]);
+  }, [wallet, tokenAddressesKey, refresh, tokenCount]);
 
   return {
     history,
@@ -175,7 +235,41 @@ export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryRe
 /**
  * Utility to convert Starknet Uint256 (low, high) to BigInt
  */
-function uint256ToBigInt(low: any, high: any): bigint {
+function uint256ToBigInt(
+  low: string | bigint | number | null | undefined,
+  high: string | bigint | number | null | undefined
+): bigint {
   if (low == null || high == null) return 0n;
   return (BigInt(high) << BigInt(128)) + BigInt(low);
+}
+
+function normalizeAddress(value: string | bigint | number): string {
+  return fromAddress(num.toHex(value)).toLowerCase();
+}
+
+function getTransferParticipant(
+  event: { keys?: Array<string | bigint | number>; data?: Array<string | bigint | number> },
+  kind: 'from' | 'to'
+): string | null {
+  const keyIndex = kind === 'from' ? 1 : 2;
+  const dataIndex = kind === 'from' ? 0 : 1;
+  const value = event.keys?.[keyIndex] ?? (event.data && event.data.length >= 4 ? event.data[dataIndex] : undefined);
+
+  if (value == null) return null;
+
+  try {
+    return normalizeAddress(value);
+  } catch {
+    return null;
+  }
+}
+
+function getTransferAmount(event: { data?: Array<string | bigint | number> }): bigint {
+  if (!event.data || event.data.length < 2) return 0n;
+
+  if (event.data.length >= 4) {
+    return uint256ToBigInt(event.data[event.data.length - 2], event.data[event.data.length - 1]);
+  }
+
+  return uint256ToBigInt(event.data[0], event.data[1]);
 }

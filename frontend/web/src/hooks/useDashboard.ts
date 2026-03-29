@@ -34,7 +34,12 @@ export const useDashboard = () => {
     tokenList.filter(t => ['ETH', 'USDC', 'STRK'].includes(t.symbol || '')),
     [tokenList]
   );
-  const { history, refresh: refreshHistory, loading: historyLoading } = useHistory(coreTokenList);
+  const {
+    history,
+    refresh: refreshHistory,
+    loading: historyLoading,
+    error: historyError,
+  } = useHistory(coreTokenList);
 
   const [assets, setAssets] = useState<DashboardAsset[]>([]);
   const [totalBalanceUsd, setTotalBalanceUsd] = useState(0);
@@ -161,7 +166,7 @@ export const useDashboard = () => {
       setAssets(results.sort((a, b) => b.totalBalanceUsd - a.totalBalanceUsd));
       setTotalBalanceUsd(totalUsd);
       setTotalSuppliedUsd(suppliedUsd);
-      await refreshHistory().catch(() => {});
+      await refreshHistory();
     } catch (err) {
       console.error('Dashboard fetch failed:', err);
       setError(err instanceof Error ? err : new Error('Failed to load dashboard data'));
@@ -180,7 +185,7 @@ export const useDashboard = () => {
     totalSuppliedUsd,
     history,
     loading: loading || historyLoading,
-    error,
+    error: error ?? historyError,
     refresh: fetchData,
     supportedTokens: tokenList,
   };

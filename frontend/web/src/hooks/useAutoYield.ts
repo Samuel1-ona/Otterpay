@@ -122,6 +122,7 @@ export const useAutoYield = ({
         let continuationToken: string | undefined;
         const allEvents: Array<{
           from_address: string;
+          keys?: string[];
           data: string[];
         }> = [];
         
@@ -140,7 +141,7 @@ export const useAutoYield = ({
 
         do {
           const eventsResponse: {
-            events: Array<{ from_address: string; data: string[] }>;
+            events: Array<{ from_address: string; keys?: string[]; data: string[] }>;
             continuation_token?: string;
           } = await provider.getEvents({
             from_block: { block_number: fromBlock },
@@ -169,9 +170,9 @@ export const useAutoYield = ({
           );
           
           if (!token) continue;
-
-          // event.data matches [from, to, value_low, value_high] in ERC20 Transfer event
-          const amountRaw = uint256ToBigInt(event.data[2], event.data[3]);
+          
+          // Starknet Transfer events keep indexed addresses in `keys`; `data` is the uint256 amount.
+          const amountRaw = getTransferAmount(event.data);
           const incomingAmount = Amount.fromRaw(amountRaw, token);
 
           if (incomingAmount.isZero()) continue;
@@ -215,6 +216,16 @@ export const useAutoYield = ({
  */
 function uint256ToBigInt(low: string, high: string): bigint {
   return (BigInt(high) << BigInt(128)) + BigInt(low);
+}
+
+function getTransferAmount(data: string[]): bigint {
+  if (data.length < 2) return 0n;
+
+  if (data.length >= 4) {
+    return uint256ToBigInt(data[data.length - 2], data[data.length - 1]);
+  }
+
+  return uint256ToBigInt(data[0], data[1]);
 }
 
 function getMinimumDeposit(token: Token): Amount {

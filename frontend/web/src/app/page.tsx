@@ -11,7 +11,7 @@ import { fromAddress } from 'starkzap';
 
 export default function Dashboard() {
   const { wallet, connect, connectWithCartridge, isLoading: isConnecting } = useStarkZap();
-  const { assets, totalBalanceUsd, totalSuppliedUsd, history, loading, refresh, supportedTokens } = useDashboard();
+  const { assets, totalBalanceUsd, totalSuppliedUsd, history, loading, error, refresh, supportedTokens } = useDashboard();
   const { login, logout, authenticated, user, getAccessToken, ready } = usePrivy();
   const { send, loading: isSending } = useTokens();
   const { supply, withdraw, withdrawMax, loading: isLendingAction } = useLending();
@@ -366,7 +366,9 @@ export default function Dashboard() {
       <section className="space-y-4">
         <h3 className="text-sm font-semibold text-zinc-400 px-1">Recent Activity</h3>
         <div className="rounded-2xl bg-zinc-900/50 border border-zinc-800 overflow-hidden">
-          {history.length === 0 ? (
+          {error ? (
+            <div className="p-6 text-center text-red-400 text-sm">{error.message}</div>
+          ) : history.length === 0 ? (
             <div className="p-8 text-center text-zinc-500 text-sm">No recent transactions</div>
           ) : (
             <div className="divide-y divide-zinc-800/50">
