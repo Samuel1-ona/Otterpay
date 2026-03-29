@@ -9,7 +9,7 @@ import { useTokens } from '@/hooks/useTokens';
 import { Token, Amount } from 'starkzap';
 
 export default function Dashboard() {
-  const { wallet, connect, isLoading: isConnecting } = useStarkZap();
+  const { wallet, connect, connectWithCartridge, isLoading: isConnecting } = useStarkZap();
   const { assets, totalBalanceUsd, totalYieldUsd, history, loading, refresh, supportedTokens } = useDashboard();
   const { login, logout, authenticated, user, getAccessToken, ready } = usePrivy();
   const { send, loading: isSending } = useTokens();
@@ -56,7 +56,7 @@ export default function Dashboard() {
     syncWallet();
   }, [ready, authenticated, user, wallet, isConnecting, connect, getAccessToken]);
 
-  const handleConnect = async () => {
+  const handlePrivyConnect = async () => {
     if (!authenticated) {
       login();
     } else {
@@ -67,10 +67,19 @@ export default function Dashboard() {
     }
   };
 
+  const handleCartridgeConnect = async () => {
+    try {
+      await connectWithCartridge();
+    } catch (err) {
+      console.error('Cartridge connection failed:', err);
+    }
+  };
+
   const handleSend = async () => {
     if (!selectedAsset || !recipient || !amount) return;
     setStatus({ type: 'loading', message: 'Initiating transfer...' });
     try {
+      // @ts-ignore - Address type mismatch
       const tx = await send(selectedAsset.token, recipient, amount);
       setStatus({ type: 'success', message: `Transfer broadcasted: ${tx.hash.slice(0, 10)}...` });
       setTimeout(() => {
@@ -229,13 +238,22 @@ export default function Dashboard() {
       {/* Wallet Status */}
       <footer className="mt-auto py-8">
         {!wallet ? (
-          <button 
-            className="w-full py-4 rounded-xl bg-white text-black font-bold text-sm shadow-xl shadow-white/10 active:scale-98 transition-all hover:bg-zinc-200 disabled:opacity-50"
-            disabled={!ready || isConnecting}
-            onClick={handleConnect}
-          >
-            {isConnecting ? 'Setting up wallet...' : 'Connect with Social Login'}
-          </button>
+          <div className="space-y-3">
+            <button 
+              className="w-full py-4 rounded-xl bg-white text-black font-bold text-sm shadow-xl shadow-white/10 active:scale-98 transition-all hover:bg-zinc-200 disabled:opacity-50"
+              disabled={!ready || isConnecting}
+              onClick={handlePrivyConnect}
+            >
+              {isConnecting ? 'Setting up wallet...' : 'Social Login (Privy)'}
+            </button>
+            <button 
+              className="w-full py-4 rounded-xl bg-indigo-500 text-white font-bold text-sm shadow-xl shadow-indigo-500/10 active:scale-98 transition-all hover:bg-indigo-400 disabled:opacity-50"
+              disabled={isConnecting}
+              onClick={handleCartridgeConnect}
+            >
+              {isConnecting ? 'Opening Controller...' : 'Connect with Cartridge'}
+            </button>
+          </div>
         ) : (
           <div className="flex items-center justify-center space-x-2 text-zinc-500 text-xs font-mono">
             <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />

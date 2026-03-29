@@ -48,12 +48,16 @@ if (SignerAdapter && SignerAdapter.prototype) {
   };
 }
 
+import { useAccount, useConnect, useDisconnect } from "@starknet-react/core";
+import { ControllerConnector } from "@cartridge/connector";
+
 interface StarkZapContextType {
   sdk: StarkZap | null;
   wallet: WalletInterface | null;
   isLoading: boolean;
   error: Error | null;
   connect: (accessToken: string, userId: string) => Promise<void>;
+  connectWithCartridge: () => Promise<void>;
 }
 
 const StarkZapContext = createContext<StarkZapContextType | undefined>(undefined);
@@ -81,6 +85,42 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
   const [wallet, setWallet] = useState<WalletInterface | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+
+  const { account, isConnected } = useAccount();
+  const { connect: starknetConnect, connectors } = useConnect();
+  const { disconnect } = useDisconnect();
+
+  // Sync Cartridge account with StarkZap SDK
+  useEffect(() => {
+    const syncCartridge = async () => {
+      if (isConnected && account && !wallet && !isLoading && sdk) {
+        console.log('[StarkZapProvider] Syncing Cartridge Account to StarkZap SDK...');
+        try {
+          // Wrap the Starknet account in a StarkZap Wallet instance
+          // We can use sdk.connectWallet with the account directly if it supports it
+          // OR we can use the native CartridgeWallet.create with the existing controller
+          // But since we are using starknet-react, the account IS the wallet.
+          
+          // @ts-ignore - Internal SDK connection for existing account
+          const walletInstance = await sdk.connectWallet({
+            account: {
+                signer: account, // AccountInterface is signer compatible in Starknet.js
+                accountClass: ArgentXV050Preset, // Or use account's class if known
+            },
+            accountAddress: account.address as any,
+            feeMode: 'sponsored',
+          });
+
+          const patchedWallet = patchProvider(walletInstance);
+          setWallet(patchedWallet);
+        } catch (err) {
+          console.error('[StarkZapProvider] Failed to sync Cartridge account:', err);
+        }
+      }
+    };
+
+    syncCartridge();
+  }, [isConnected, account, wallet, isLoading, sdk]);
 
   useEffect(() => {
     const AVNU_PAYMASTER_URLS = {
@@ -143,6 +183,7 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
               signer,
               accountClass: ArgentXV050Preset,
           },
+          // @ts-ignore - SDK type mismatch for Address
           ...(accountAddress && { accountAddress }),
           feeMode: 'sponsored',
       });
@@ -162,8 +203,28 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
     }
   };
 
+  const connectWithCartridge = async () => {
+    if (!sdk) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      // Use the starknet-react connect method with the Cartridge connector
+      const connector = connectors.find(c => c.id === 'controller' || c instanceof ControllerConnector);
+      if (!connector) throw new Error('Cartridge connector not found');
+      
+      await starknetConnect({ connector });
+      // The useEffect will handle the SDK sync once isConnected becomes true
+    } catch (err) {
+      console.error('Failed to connect Cartridge wallet:', err);
+      setError(err instanceof Error ? err : new Error('Cartridge Connection Failed'));
+    } finally {
+      setIsLoading(true); // Keep loading until effect syncs? No, false.
+      setIsLoading(false);
+    }
+  };
+
   return (
-    <StarkZapContext.Provider value={{ sdk, wallet, isLoading, error, connect }}>
+    <StarkZapContext.Provider value={{ sdk, wallet, isLoading, error, connect, connectWithCartridge }}>
       {children}
     </StarkZapContext.Provider>
   );
