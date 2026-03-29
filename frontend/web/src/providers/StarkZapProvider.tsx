@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { StarkZap, WalletInterface, PrivySigner, SignerAdapter } from 'starkzap';
+import { StarkZap, WalletInterface, PrivySigner, SignerAdapter, ArgentXV050Preset } from 'starkzap';
 import { hash, CallData } from 'starknet';
 
 /**
@@ -92,6 +92,7 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
       try {
         const instance = new StarkZap({
           network,
+          rpcUrl: process.env.NEXT_PUBLIC_RPC_URL || process.env.NEXT_RPC,
           paymaster: avnuApiKey ? {
             nodeUrl: AVNU_PAYMASTER_URLS[network],
             headers: { 
@@ -110,40 +111,49 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
     initSdk();
   }, [network, avnuApiKey]);
 
-  const connect = async (accessToken: string, userId: string) => {
+  const connect = async (accessToken: string, userId: string, accountAddress?: string) => {
     if (!sdk) return;
     setIsLoading(true);
     setError(null);
     try {
-      const onboard = await sdk.onboard({
-        strategy: 'privy',
-        privy: {
-          resolve: async () => {
-            const response = await fetch('/api/privy/wallet', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${accessToken}`,
-              },
-              body: JSON.stringify({ userId })
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'Failed to get Privy wallet');
-            const { wallet: privyWallet } = data;
-            return {
-              walletId: privyWallet.id,
-              publicKey: privyWallet.publicKey,
-              serverUrl: `${window.location.origin}/api/privy/sign`,
-            };
+      const privy = await fetch('/api/privy/wallet', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
           },
-        },
-        accountPreset: 'argentXV050',
-        feeMode: 'sponsored',
-        deploy: 'if_needed',
+          body: JSON.stringify({ userId })
+      }).then(r => r.json());
+
+      if (!privy.wallet) throw new Error(privy.error || 'Failed to get Privy wallet');
+      
+      console.log('[StarkZapProvider] Privy Wallet Resolved:', {
+        walletId: privy.wallet.id,
+        publicKey: privy.wallet.publicKey,
+      });
+
+      const signer = new PrivySigner({
+          walletId: privy.wallet.id,
+          publicKey: privy.wallet.publicKey,
+          serverUrl: `${window.location.origin}/api/privy/sign`,
+      });
+
+      const walletInstance = await sdk.connectWallet({
+          account: {
+              signer,
+              accountClass: ArgentXV050Preset,
+          },
+          ...(accountAddress && { accountAddress }),
+          feeMode: 'sponsored',
       });
       
-      const walletInstance = patchProvider(onboard.wallet);
-      setWallet(walletInstance);
+      const patchedWallet = patchProvider(walletInstance);
+      
+      // Auto-deploy if needed (starkzap standard)
+      await patchedWallet.ensureReady({ deploy: 'if_needed' });
+
+      console.log('[StarkZapProvider] Connected Address:', patchedWallet.address);
+      setWallet(patchedWallet);
     } catch (err) {
       console.error('Failed to connect wallet:', err);
       setError(err instanceof Error ? err : new Error('Wallet Connection Failed'));

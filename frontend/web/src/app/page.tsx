@@ -1,15 +1,28 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useStarkZap } from '@/providers/StarkZapProvider';
 import { useDashboard } from '@/hooks/useDashboard';
 import { usePrivy } from '@privy-io/react-auth';
 import { useAutoYield } from '@/hooks/useAutoYield';
+import { useTokens } from '@/hooks/useTokens';
+import { Token, Amount } from 'starkzap';
 
 export default function Dashboard() {
   const { wallet, connect, isLoading: isConnecting } = useStarkZap();
   const { assets, totalBalanceUsd, totalYieldUsd, history, loading, refresh, supportedTokens } = useDashboard();
   const { login, logout, authenticated, user, getAccessToken, ready } = usePrivy();
+  const { send, loading: isSending } = useTokens();
+
+  // Modal State
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [showReceiveModal, setShowReceiveModal] = useState(false);
+  
+  // Transaction State
+  const [selectedAsset, setSelectedAsset] = useState(assets[0] || null);
+  const [recipient, setRecipient] = useState('');
+  const [amount, setAmount] = useState('');
+  const [status, setStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ type: 'idle' });
 
   const { isDepositing: isAutoYielding } = useAutoYield({
     wallet,
@@ -21,12 +34,19 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
+    if (assets.length > 0 && !selectedAsset) {
+      setSelectedAsset(assets[0]);
+    }
+  }, [assets, selectedAsset]);
+
+  useEffect(() => {
     const syncWallet = async () => {
       if (ready && authenticated && user && !wallet && !isConnecting) {
         try {
           const token = await getAccessToken();
           if (token && user) {
-            await connect(token, user.id);
+            const overrideAddress = process.env.NEXT_PUBLIC_STARKNET_ADDRESS;
+            await connect(token, user.id, overrideAddress);
           }
         } catch (err) {
           console.error('Failed to sync Privy wallet with StarkZap:', err);
@@ -43,9 +63,33 @@ export default function Dashboard() {
     } else {
       const token = await getAccessToken();
       if (token && user) {
-        await connect(token, user.id);
+        const overrideAddress = process.env.NEXT_PUBLIC_STARKNET_ADDRESS;
+        await connect(token, user.id, overrideAddress);
       }
     }
+  };
+
+  const handleSend = async () => {
+    if (!selectedAsset || !recipient || !amount) return;
+    setStatus({ type: 'loading', message: 'Initiating transfer...' });
+    try {
+      const tx = await send(selectedAsset.token, recipient, amount);
+      setStatus({ type: 'success', message: `Transfer broadcasted: ${tx.hash.slice(0, 10)}...` });
+      setTimeout(() => {
+        setShowSendModal(false);
+        setStatus({ type: 'idle' });
+        setAmount('');
+        setRecipient('');
+        refresh();
+      }, 3000);
+    } catch (err: any) {
+      setStatus({ type: 'error', message: err.message || 'Transfer failed' });
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    // Simple visual feedback could go here
   };
 
   return (
@@ -106,13 +150,21 @@ export default function Dashboard() {
 
       {/* Quick Actions */}
       <section className="grid grid-cols-2 gap-4">
-        <button className="flex flex-col items-center justify-center space-y-2 py-6 rounded-2xl bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition-all active:scale-95 group">
+        <button 
+          onClick={() => setShowSendModal(true)}
+          disabled={!wallet}
+          className="flex flex-col items-center justify-center space-y-2 py-6 rounded-2xl bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition-all active:scale-95 group disabled:opacity-50"
+        >
           <div className="p-3 rounded-full bg-indigo-500/10 text-indigo-400 group-hover:bg-indigo-500 group-hover:text-white transition-colors">
             <SendIcon />
           </div>
           <span className="text-sm font-medium text-zinc-300">Send</span>
         </button>
-        <button className="flex flex-col items-center justify-center space-y-2 py-6 rounded-2xl bg-zinc-900 border border-zinc-800 hover:border-purple-500/50 transition-all active:scale-95 group">
+        <button 
+          onClick={() => setShowReceiveModal(true)}
+          disabled={!wallet}
+          className="flex flex-col items-center justify-center space-y-2 py-6 rounded-2xl bg-zinc-900 border border-zinc-800 hover:border-purple-500/50 transition-all active:scale-95 group disabled:opacity-50"
+        >
           <div className="p-3 rounded-full bg-purple-500/10 text-purple-400 group-hover:bg-purple-500 group-hover:text-white transition-colors">
             <ReceiveIcon />
           </div>
@@ -193,6 +245,142 @@ export default function Dashboard() {
           </div>
         )}
       </footer>
+
+      {/* Send Modal */}
+      {showSendModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl space-y-6">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-bold text-white">Send Assets</h2>
+              <button 
+                onClick={() => { setShowSendModal(false); setStatus({ type: 'idle' }); }}
+                className="p-1 text-zinc-500 hover:text-white"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+
+            {/* Token Selector */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Select Token</label>
+              <div className="grid grid-cols-2 gap-2">
+                {assets.map((asset) => (
+                  <button
+                    key={asset.token.address}
+                    onClick={() => setSelectedAsset(asset)}
+                    className={`p-3 rounded-2xl border transition-all text-left ${selectedAsset?.token.address === asset.token.address ? 'bg-indigo-500/10 border-indigo-500' : 'bg-zinc-900/50 border-zinc-800 hover:border-zinc-700'}`}
+                  >
+                    <p className="text-xs font-bold text-white">{asset.token.symbol}</p>
+                    <p className="text-[10px] text-zinc-500">{asset.walletBalance.add(asset.lendingBalance).toFormatted(true)} available</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Recipient */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Recipient Address</label>
+              <input 
+                type="text" 
+                placeholder="0x..."
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+                className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white text-sm placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500 transition-all font-mono"
+              />
+            </div>
+
+            {/* Amount */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-baseline">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Amount</label>
+                {selectedAsset && (
+                  <button 
+                    onClick={() => setAmount(selectedAsset.walletBalance.add(selectedAsset.lendingBalance).toFormatted())}
+                    className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300"
+                  >
+                    Max
+                  </button>
+                )}
+              </div>
+              <input 
+                type="number" 
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white text-2xl font-bold placeholder:text-zinc-800 focus:outline-none focus:border-indigo-500 transition-all"
+              />
+            </div>
+
+            {/* Status Message */}
+            {status.type !== 'idle' && (
+              <div className={`p-4 rounded-xl text-xs font-medium ${status.type === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : status.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}>
+                {status.message}
+              </div>
+            )}
+
+            <button
+              onClick={handleSend}
+              disabled={isSending || !selectedAsset || !recipient || !amount}
+              className="w-full py-4 rounded-2xl bg-indigo-500 text-white font-bold text-sm hover:bg-indigo-400 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-indigo-500/20"
+            >
+              {status.type === 'loading' ? 'Broadcasting...' : 'Confirm Send'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Receive Modal */}
+      {showReceiveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl space-y-8">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-bold text-white">Receive Assets</h2>
+              <button 
+                onClick={() => setShowReceiveModal(false)}
+                className="p-1 text-zinc-500 hover:text-white"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+
+            <div className="flex flex-col items-center space-y-6">
+              {/* QR Placeholder / Visual */}
+              <div className="w-48 h-48 rounded-3xl bg-white p-4 flex items-center justify-center">
+                 {/* In a real app, generate a QR here */}
+                 <div className="w-full h-full bg-zinc-100 rounded-xl flex items-center justify-center border-2 border-dashed border-zinc-300">
+                   <p className="text-[10px] text-zinc-400 font-bold uppercase text-center px-4">Starknet Sepolia QR</p>
+                 </div>
+              </div>
+
+              <div className="w-full space-y-2">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block text-center">Your Deposit Address</label>
+                <div 
+                  onClick={() => copyToClipboard(wallet?.address || '')}
+                  className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs font-mono break-all text-center cursor-pointer hover:bg-zinc-800 transition-all active:scale-98 group relative"
+                >
+                  {wallet?.address}
+                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <CopyIcon />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20">
+              <p className="text-[10px] text-indigo-400 text-center font-medium leading-relaxed">
+                Funds received at this address will be automatically supplied to Vesu to start earning 12.4% APY.
+              </p>
+            </div>
+
+            <button
+                onClick={() => setShowReceiveModal(false)}
+                className="w-full py-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white font-bold text-sm hover:bg-zinc-800 transition-all"
+              >
+                Done
+              </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -250,6 +438,22 @@ function HistoryIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
     </svg>
   );
 }

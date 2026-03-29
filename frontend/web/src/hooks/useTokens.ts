@@ -18,7 +18,10 @@ export const useTokens = () => {
   const presets = useMemo(() => {
     if (!wallet) return null;
     try {
-      return getPresets(wallet.getChainId());
+      const chainId = wallet.getChainId();
+      const p = getPresets(chainId);
+      console.log(`[useTokens] Presets loaded for chain ${chainId}:`, Object.keys(p || {}).length);
+      return p;
     } catch (err) {
       console.error('Failed to load token presets:', err);
       return null;
