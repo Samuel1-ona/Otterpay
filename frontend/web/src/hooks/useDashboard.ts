@@ -4,6 +4,17 @@ import { useTokens } from './useTokens';
 import { useLending } from './useLending';
 import { useHistory } from './useHistory';
 import { Amount, Token, LendingUserPosition } from 'starkzap';
+import { CallData, num } from 'starknet';
+
+const VESU_POOL_FACTORY = {
+  SN_MAIN: '0x3760f903a37948f97302736f89ce30290e45f441559325026842b7a6fb388c0',
+  SN_SEPOLIA: '0x03ac869e64b1164aaee7f3fd251f86581eab8bfbbd2abdf1e49c773282d4a092',
+} as const;
+
+const VESU_DEFAULT_POOL = {
+  SN_MAIN: '0x0451fe483d5921a2919ddd81d0de6696669bccdacd859f72a4fba7656b97c3b5',
+  SN_SEPOLIA: '0x06227c13372b8c7b7f38ad1cfe05b5cf515b4e5c596dd05fe8437ab9747b2093',
+} as const;
 
 export interface DashboardAsset {
   token: Token;
@@ -15,8 +26,8 @@ export interface DashboardAsset {
 
 export const useDashboard = () => {
   const { sdk, wallet } = useStarkZap();
-  const { presets, balanceOf, resolveToken } = useTokens();
-  const { getPosition, getPositions } = useLending();
+  const { presets, balanceOf } = useTokens();
+  const { getPositions } = useLending();
   
   const tokenList = useMemo(() => presets ? Object.values(presets) : [], [presets]);
   const coreTokenList = useMemo(() => 
@@ -27,7 +38,7 @@ export const useDashboard = () => {
 
   const [assets, setAssets] = useState<DashboardAsset[]>([]);
   const [totalBalanceUsd, setTotalBalanceUsd] = useState(0);
-  const [totalYieldUsd, setTotalYieldUsd] = useState(0);
+  const [totalSuppliedUsd, setTotalSuppliedUsd] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -40,6 +51,7 @@ export const useDashboard = () => {
 
     try {
       const allPresets = Object.values(presets);
+      const chainLiteral = wallet.getChainId().toLiteral();
       
       // 1. Fetch ALL positions first to know which tokens the user is interacting with
       const allPositions = await getPositions();
@@ -65,18 +77,35 @@ export const useDashboard = () => {
         return isCore || hasPosition;
       });
 
+      if (positionMap.size === 0) {
+        for (const token of tokensToFetch) {
+          const earnBalance = await readVesuEarnBalance(wallet, token, chainLiteral).catch(() => 0n);
+          if (earnBalance > 0n) {
+            positionMap.set(token.address.toLowerCase(), {
+              amount: earnBalance,
+              usdValue: 0,
+              token,
+            });
+          }
+        }
+      }
+
       const results: DashboardAsset[] = [];
       let totalUsd = 0;
-      let yieldUsd = 0;
+      let suppliedUsd = 0;
 
       // 3. Fetch lending markets for price fallback
-      const markets = await (wallet.lending() as any).getMarkets().catch(() => []); 
+      const markets = await (wallet.lending() as { getMarkets: () => Promise<unknown[]> }).getMarkets().catch(() => []); 
       const priceMap = new Map<string, number>();
       
       // Prices will be fetched dynamically via SDK or market data
 
-      (markets || []).forEach((m: any) => {
-        if (m.stats?.totalSupplied && (m.stats.totalSupplied as any).usdValue) {
+      (markets || []).forEach((market: unknown) => {
+        const m = market as {
+          asset: { address: string; decimals?: number };
+          stats?: { totalSupplied?: Amount & { usdValue?: bigint | number | string } };
+        };
+        if (m.stats?.totalSupplied && m.stats.totalSupplied.usdValue) {
            const units = Number(m.stats.totalSupplied.toBase()) / (10 ** (m.asset.decimals || 18));
            const usd = Number(m.stats.totalSupplied.usdValue) / 1e18;
            const price = units > 0 ? usd / units : 0;
@@ -91,10 +120,6 @@ export const useDashboard = () => {
         // Find corresponding lending position
         const pos = positionMap.get(token.address.toLowerCase());
         const lBalance = pos ? Amount.fromRaw(pos.amount, token) : Amount.fromRaw(0n, token);
-        const collateralUsdValue = pos ? pos.usdValue : 0;
-        
-        yieldUsd += collateralUsdValue; 
-        
         let price = priceMap.get(token.address.toLowerCase()) || 0;
 
         if (price === 0 && sdk && token.symbol !== 'USDC') {
@@ -110,6 +135,12 @@ export const useDashboard = () => {
           }
         }
         if (token.symbol === 'USDC') price = 1;
+
+        const collateralUsdValue = pos
+          ? pos.usdValue || (Number(lBalance.toBase()) / (10 ** (token.decimals || 18))) * price
+          : 0;
+        
+        suppliedUsd += collateralUsdValue; 
 
         const balanceNumeric = Number(wBalance.toBase()) / (10 ** (token.decimals || 18));
         const tokenUsd = collateralUsdValue + (balanceNumeric * price);
@@ -129,7 +160,7 @@ export const useDashboard = () => {
       console.log(`[Dashboard] Fetched ${tokensToFetch.length} tokens. Displaying ${results.length} relevant assets.`);
       setAssets(results.sort((a, b) => b.totalBalanceUsd - a.totalBalanceUsd));
       setTotalBalanceUsd(totalUsd);
-      setTotalYieldUsd(yieldUsd);
+      setTotalSuppliedUsd(suppliedUsd);
       await refreshHistory().catch(() => {});
     } catch (err) {
       console.error('Dashboard fetch failed:', err);
@@ -137,7 +168,7 @@ export const useDashboard = () => {
     } finally {
       setLoading(false);
     }
-  }, [wallet, presets, balanceOf, getPositions, refreshHistory, resolveToken, sdk]);
+  }, [wallet, presets, balanceOf, getPositions, refreshHistory, sdk]);
 
   useEffect(() => {
     fetchData();
@@ -146,7 +177,7 @@ export const useDashboard = () => {
   return {
     assets,
     totalBalanceUsd,
-    totalYieldUsd,
+    totalSuppliedUsd,
     history,
     loading: loading || historyLoading,
     error,
@@ -154,3 +185,50 @@ export const useDashboard = () => {
     supportedTokens: tokenList,
   };
 };
+
+async function readVesuEarnBalance(
+  wallet: NonNullable<ReturnType<typeof useStarkZap>['wallet']>,
+  token: Token,
+  chainLiteral: 'SN_MAIN' | 'SN_SEPOLIA'
+): Promise<bigint> {
+  const provider = wallet.getProvider();
+  const poolFactory = VESU_POOL_FACTORY[chainLiteral];
+  const defaultPool = VESU_DEFAULT_POOL[chainLiteral];
+
+  const vTokenResult = await provider.callContract({
+    contractAddress: poolFactory,
+    entrypoint: 'v_token_for_asset',
+    calldata: CallData.compile([defaultPool, token.address]),
+  });
+
+  const vTokenAddress = vTokenResult[0];
+  if (vTokenAddress == null || BigInt(String(vTokenAddress)) === 0n) {
+    return 0n;
+  }
+
+  const shareResult = await provider.callContract({
+    contractAddress: num.toHex(vTokenAddress),
+    entrypoint: 'balance_of',
+    calldata: CallData.compile([wallet.address]),
+  });
+
+  const shares = parseUint256Result(shareResult);
+  if (shares === 0n) {
+    return 0n;
+  }
+
+  const assetResult = await provider.callContract({
+    contractAddress: num.toHex(vTokenAddress),
+    entrypoint: 'convert_to_assets',
+    calldata: CallData.compile([{ low: num.toHex(shares & ((1n << 128n) - 1n)), high: num.toHex(shares >> 128n) }]),
+  });
+
+  return parseUint256Result(assetResult);
+}
+
+function parseUint256Result(result: Array<string | bigint | number>): bigint {
+  const low = result[0];
+  const high = result[1];
+  if (low == null || high == null) return 0n;
+  return BigInt(String(low)) + (BigInt(String(high)) << 128n);
+}
