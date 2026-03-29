@@ -22,7 +22,7 @@ export interface AutoYieldOptions {
 export const useAutoYield = ({
   wallet,
   supportedTokens,
-  pollIntervalMs = 15000,
+  pollIntervalMs = 60000,
   onDepositSuccess,
   onDepositError,
 }: AutoYieldOptions) => {
@@ -47,50 +47,76 @@ export const useAutoYield = ({
 
         const currentAddress = wallet.address;
 
-        for (const token of supportedTokens) {
-          // 2. Fetch events for this token
-          const eventsResponse = await provider.getEvents({
-            address: token.address,
-            from_block: { block_number: lastProcessedBlockRef.current + 1 },
-            to_block: 'latest',
-            keys: [[TRANSFER_EVENT_SELECTOR], [], [num.toHex(currentAddress)]], // [Transfer, any_from, our_address]
-            chunk_size: 10,
+        // 2. Fetch all transfer events to this wallet in one go
+        let continuationToken: string | undefined;
+        const allEvents: any[] = [];
+        
+        // Use a consistent target block for this poll
+        const latestBlock = await provider.getBlock('latest');
+        const latestBlockNumber = latestBlock.block_number;
+
+        const fromBlock = lastProcessedBlockRef.current + 1;
+        if (fromBlock > latestBlockNumber) {
+          // Update ref if we haven't seen this block yet, though typically it should be same
+          lastProcessedBlockRef.current = latestBlockNumber;
+          return;
+        }
+
+        console.log(`[AutoYield] Polling for transfers from block ${fromBlock} to ${latestBlockNumber}`);
+
+        do {
+          const eventsResponse: any = await provider.getEvents({
+            from_block: { block_number: fromBlock },
+            to_block: { block_number: latestBlockNumber },
+            keys: [[TRANSFER_EVENT_SELECTOR], [], [num.toHex(currentAddress)]],
+            chunk_size: 50,
+            continuation_token: continuationToken,
           });
 
-          for (const event of eventsResponse.events) {
-            // event.data matches [from, to, value_low, value_high] in ERC20 Transfer event
-            const amountRaw = uint256ToBigInt(event.data[2], event.data[3]);
-            const incomingAmount = Amount.fromRaw(amountRaw, token);
+          allEvents.push(...eventsResponse.events);
+          continuationToken = eventsResponse.continuation_token;
+        } while (continuationToken);
 
-            if (incomingAmount.isZero()) continue;
+        if (allEvents.length === 0) {
+          lastProcessedBlockRef.current = latestBlockNumber;
+          return;
+        }
 
-            console.log(`[AutoYield] Detected incoming ${incomingAmount.toFormatted()}`);
+        for (const event of allEvents) {
+          // Find if this event belongs to a supported token
+          const token = supportedTokens.find(t => 
+            num.toBigInt(t.address) === num.toBigInt(event.from_address)
+          );
+          
+          if (!token) continue;
 
-            // 3. Trigger Auto-Deposit to Vesu
-            setIsDepositing(true);
-            try {
-              // The wallet.lending().supply() handles the paymaster gas sponsorship internally
-              const tx = await wallet.lending().deposit({ token, amount: incomingAmount });
-              
-              console.log(`[AutoYield] Auto-deposit triggered: ${tx.hash}`);
-              
-              if (onDepositSuccess) {
-                onDepositSuccess(token, incomingAmount, tx.hash);
-              }
-            } catch (depositErr: any) {
-              console.error(`[AutoYield] Failed to auto-deposit:`, depositErr);
-              if (onDepositError) onDepositError(depositErr);
-            } finally {
-              setIsDepositing(false);
+          // event.data matches [from, to, value_low, value_high] in ERC20 Transfer event
+          const amountRaw = uint256ToBigInt(event.data[2], event.data[3]);
+          const incomingAmount = Amount.fromRaw(amountRaw, token);
+
+          if (incomingAmount.isZero()) continue;
+
+          console.log(`[AutoYield] Detected incoming ${incomingAmount.toFormatted()} (${token.symbol})`);
+
+          // 3. Trigger Auto-Deposit to Vesu
+          setIsDepositing(true);
+          try {
+            const tx = await wallet.lending().deposit({ token, amount: incomingAmount });
+            console.log(`[AutoYield] Auto-deposit triggered for ${token.symbol}: ${tx.hash}`);
+            
+            if (onDepositSuccess) {
+              onDepositSuccess(token, incomingAmount, tx.hash);
             }
-          }
-
-          // Update last processed block based on the latest event block number
-          if (eventsResponse.events.length > 0) {
-            const maxBlock = Math.max(...eventsResponse.events.map(e => e.block_number || 0));
-            lastProcessedBlockRef.current = maxBlock;
+          } catch (depositErr: any) {
+            console.error(`[AutoYield] Failed to auto-deposit ${token.symbol}:`, depositErr);
+            if (onDepositError) onDepositError(depositErr);
+          } finally {
+            setIsDepositing(false);
           }
         }
+
+        // Update last processed block
+        lastProcessedBlockRef.current = latestBlockNumber;
       } catch (err) {
         console.error('[AutoYield] Polling error:', err);
       }

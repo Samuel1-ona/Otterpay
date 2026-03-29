@@ -101,6 +101,27 @@ export default function Dashboard() {
 
   return (
     <main className="flex-1 flex flex-col p-6 max-w-lg mx-auto w-full space-y-8">
+      {/* HTTPS & Crypto Warning for Cartridge */}
+      {typeof window !== 'undefined' && (window.location.protocol === 'http:' || !window.crypto?.subtle) && (
+        <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold text-center space-y-2">
+          <div>⚠️ SECURE CONTEXT REQUIRED</div>
+          <p className="font-normal opacity-80">
+            {window.location.protocol === 'http:' 
+              ? 'Please use HTTPS for Cartridge Controller to work correctly.'
+              : 'Web Crypto API is disabled. You must fully "Trust" the self-signed certificate in your browser/OS to enable SHA-256 support.'}
+          </p>
+          <div className="pt-2">
+            <a href={window.location.href.replace('http:', 'https:')} className="underline hover:text-white px-2">Switch to HTTPS</a>
+            <button 
+              onClick={() => alert("Chrome/Edge: Go to chrome://flags/#unsafely-treat-insecure-origin-as-secure and add https://localhost:3000 to the list.")}
+              className="underline hover:text-white px-2"
+            >
+              How to trust?
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="flex justify-between items-center">
         <div>

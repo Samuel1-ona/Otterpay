@@ -19,7 +19,11 @@ export const useDashboard = () => {
   const { getPosition, getPositions } = useLending();
   
   const tokenList = useMemo(() => presets ? Object.values(presets) : [], [presets]);
-  const { history, refresh: refreshHistory, loading: historyLoading } = useHistory(tokenList);
+  const coreTokenList = useMemo(() => 
+    tokenList.filter(t => ['ETH', 'USDC', 'STRK'].includes(t.symbol || '')),
+    [tokenList]
+  );
+  const { history, refresh: refreshHistory, loading: historyLoading } = useHistory(coreTokenList);
 
   const [assets, setAssets] = useState<DashboardAsset[]>([]);
   const [totalBalanceUsd, setTotalBalanceUsd] = useState(0);

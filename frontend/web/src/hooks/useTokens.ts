@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useStarkZap } from '../providers/StarkZapProvider';
-import { Amount, Token, Address, getPresets, getTokensFromAddresses, LendingPosition } from 'starkzap';
+import { Amount, Token, Address, getPresets, getTokensFromAddresses, LendingPosition, fromAddress } from 'starkzap';
+import { num } from 'starknet';
 
 /**
  * Hook for core Token (ERC20) module operations (Web).
@@ -91,8 +92,11 @@ export const useTokens = () => {
           collateralToken: token, 
           debtToken: debtToken
         });
-      } catch (e) {
-        console.warn(`[useTokens] Lending position query failed for ${token.symbol}. Proceeding with wallet balance only.`, e);
+      } catch (e: unknown) {
+        // Suppress expected "asset-config-nonexistent" errors for non-Vesu pairs
+        if (!(e instanceof Error) || !e.message.includes('asset-config-nonexistent')) {
+          console.warn(`[useTokens] Lending position query failed for ${token.symbol}. Proceeding with wallet balance only.`, e);
+        }
       }
       
       const totalLiquidityRaw = walletBalance.toBase() + (position.collateralAmount ?? 0n);
@@ -102,11 +106,16 @@ export const useTokens = () => {
         throw new Error(`Insufficient total balance (Wallet + Vesu). Needed: ${targetAmount.toFormatted()}, Found: ${totalLiquidity.toFormatted()}`);
       }
 
+      // Normalize recipient address to ensure correct padding (fixes potential WASM unreachable error)
+      const normalizedTo = fromAddress(num.toHex(to));
+      console.log(`[useTokens] Building transfer to ${normalizedTo} for ${amount} ${token.symbol}`);
+
       const builder = wallet.tx();
 
       // If wallet balance is insufficient, withdraw the difference from Vesu
       if (walletBalance.lt(targetAmount)) {
         const diff = targetAmount.subtract(walletBalance);
+        console.log(`[useTokens] Insufficient wallet balance. Withdrawing ${diff.toFormatted()} from Vesu.`);
         
         builder.lendWithdraw({
           token,
@@ -116,7 +125,7 @@ export const useTokens = () => {
 
       // Chain the transfer and send
       const tx = await builder
-        .transfer(token, [{ to, amount: targetAmount }])
+        .transfer(token, [{ to: normalizedTo, amount: targetAmount }])
         .send();
 
       return tx;
