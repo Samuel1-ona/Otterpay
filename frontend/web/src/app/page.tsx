@@ -69,6 +69,10 @@ export default function Dashboard() {
     if (!wallet || !confidentialConfig) return null;
     return `starkpay:confidential:${wallet.address.toLowerCase()}:${confidentialConfig.contractAddress.toLowerCase()}`;
   }, [wallet, confidentialConfig]);
+  const autoYieldStorageKey = useMemo(() => {
+    if (!wallet) return null;
+    return `starkpay:auto-yield:${wallet.address.toLowerCase()}`;
+  }, [wallet]);
   const confidentialHasPending =
     !!confidentialPendingBalance && !confidentialPendingBalance.isZero();
   const confidentialHistoryPreview = confidentialActivity.slice(0, 4);
@@ -94,6 +98,7 @@ export default function Dashboard() {
   const [supplyStatus, setSupplyStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ type: 'idle' });
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [withdrawStatus, setWithdrawStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ type: 'idle' });
+  const [autoYieldOverrides, setAutoYieldOverrides] = useState<Record<string, boolean>>({});
   const [confidentialSetupMode, setConfidentialSetupMode] = useState<'create' | 'import'>('create');
   const [confidentialPrivateKeyInput, setConfidentialPrivateKeyInput] = useState('');
   const [confidentialFundAmount, setConfidentialFundAmount] = useState('');
@@ -121,6 +126,10 @@ export default function Dashboard() {
     confidentialStorageKey && typeof window !== 'undefined'
       ? window.localStorage.getItem(confidentialStorageKey)
       : null;
+  const autoYieldEnabled =
+    autoYieldStorageKey != null
+      ? autoYieldOverrides[autoYieldStorageKey] ?? readStoredAutoYieldPreference(autoYieldStorageKey)
+      : false;
 
   const {
     isDepositing: isAutoYielding,
@@ -130,19 +139,21 @@ export default function Dashboard() {
   } = useAutoYield({
     wallet,
     supportedTokens,
-    autoSweepIdleBalances: false,
+    enabled: autoYieldEnabled,
+    autoSweepIdleBalances: autoYieldEnabled,
     onDepositSuccess: (token, amount) => {
       console.log(`Successfully auto-deposited ${amount.toFormatted()} ${token.symbol}`);
       refresh();
     }
   });
 
-  const yieldStatusLabel =
-    totalSuppliedUsd > 0
-      ? 'Yield active in Vesu'
-      : isAutoYielding
-        ? 'Supplying to Vesu'
-        : 'Manual supply only';
+  const yieldStatusLabel = isAutoYielding
+    ? 'Supplying to Vesu'
+    : autoYieldEnabled
+      ? 'Watching incoming funds'
+      : totalSuppliedUsd > 0
+        ? 'Yield active in Vesu'
+        : 'Auto-yield is off';
 
   const yieldStatusDetail = lastDepositError
     ? `Last auto-supply failed: ${lastDepositError}`
@@ -150,7 +161,11 @@ export default function Dashboard() {
       ? `Confirmed: ${lastConfirmedDeposit.amountLabel} ${lastConfirmedDeposit.tokenSymbol} at ${new Date(lastConfirmedDeposit.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
       : lastSubmittedDeposit
         ? `Pending confirmation: ${lastSubmittedDeposit.amountLabel} ${lastSubmittedDeposit.tokenSymbol}`
-        : 'Funds move into Vesu only after you explicitly supply them';
+        : autoYieldEnabled
+          ? 'New incoming funds and eligible idle balances sweep into Vesu automatically while keeping a small fee reserve in the wallet.'
+          : 'Keep this off for manual supply, or turn it on to sweep incoming funds into Vesu automatically.';
+
+  const autoYieldModeLabel = autoYieldEnabled ? 'ON' : 'OFF';
 
   useEffect(() => {
     if (!wallet) {
@@ -633,11 +648,57 @@ export default function Dashboard() {
               <p className="mt-1 text-[11px] text-zinc-500">Kept liquid for spending and fees</p>
             </div>
             <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Auto-Supply</p>
-              <p className="mt-2 text-sm font-semibold text-emerald-400">
-                {yieldStatusLabel}
-              </p>
-              <p className="mt-1 text-[11px] text-zinc-500">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Auto-Yield</p>
+                  <p className={`mt-2 text-sm font-semibold ${autoYieldEnabled ? 'text-emerald-400' : 'text-white'}`}>
+                    {yieldStatusLabel}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={autoYieldEnabled}
+                  aria-label={autoYieldEnabled ? 'Disable auto-yield' : 'Enable auto-yield'}
+                  onClick={() => {
+                    if (!autoYieldStorageKey) return;
+
+                    const nextValue = !autoYieldEnabled;
+                    window.localStorage.setItem(
+                      autoYieldStorageKey,
+                      nextValue ? 'true' : 'false'
+                    );
+                    setAutoYieldOverrides((current) => ({
+                      ...current,
+                      [autoYieldStorageKey]: nextValue,
+                    }));
+                  }}
+                  className={`relative inline-flex h-7 w-12 shrink-0 rounded-full border transition-all ${
+                    autoYieldEnabled
+                      ? 'border-emerald-500/40 bg-emerald-500/20'
+                      : 'border-zinc-700 bg-zinc-900'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-1 h-5 w-5 rounded-full shadow-lg transition-all ${
+                      autoYieldEnabled
+                        ? 'left-6 bg-emerald-400 shadow-emerald-500/30'
+                        : 'left-1 bg-zinc-500 shadow-black/40'
+                    }`}
+                  />
+                </button>
+              </div>
+              <div className="mt-3 flex items-center justify-between rounded-xl border border-zinc-800/80 bg-zinc-900/70 px-3 py-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  Preference
+                </span>
+                <span className={`text-[10px] font-semibold uppercase tracking-[0.2em] ${
+                  autoYieldEnabled ? 'text-emerald-300' : 'text-zinc-400'
+                }`}>
+                  {autoYieldModeLabel}
+                </span>
+              </div>
+              <p className="mt-3 text-[11px] text-zinc-500">
                 {yieldStatusDetail}
               </p>
             </div>
@@ -1787,4 +1848,9 @@ function VaultIcon() {
       <circle cx="12" cy="15" r="1.5" />
     </svg>
   );
+}
+
+function readStoredAutoYieldPreference(storageKey: string): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(storageKey) === 'true';
 }

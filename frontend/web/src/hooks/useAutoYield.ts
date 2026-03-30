@@ -8,6 +8,7 @@ const TRANSFER_EVENT_SELECTOR = hash.getSelectorFromName('Transfer');
 export interface AutoYieldOptions {
   wallet: WalletInterface | null;
   supportedTokens: Token[];
+  enabled?: boolean;
   autoSweepIdleBalances?: boolean;
   pollIntervalMs?: number;
   onDepositSuccess?: (token: Token, amount: Amount, txHash: string) => void;
@@ -30,6 +31,7 @@ export interface AutoYieldUpdate {
 export const useAutoYield = ({
   wallet,
   supportedTokens,
+  enabled = true,
   autoSweepIdleBalances = false,
   pollIntervalMs = 60000,
   onDepositSuccess,
@@ -44,7 +46,15 @@ export const useAutoYield = ({
   const isPollingRef = useRef(false);
 
   useEffect(() => {
-    if (!wallet || supportedTokens.length === 0) return;
+    if (!enabled || !wallet || supportedTokens.length === 0) {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+      isPollingRef.current = false;
+      setIsDepositing(false);
+      return;
+    }
 
     const sweepIdleBalances = async (reason: 'startup' | 'incoming_transfer' | 'scheduled') => {
       let depositedAny = false;
@@ -201,7 +211,7 @@ export const useAutoYield = ({
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
-  }, [wallet, supportedTokens, autoSweepIdleBalances, pollIntervalMs, onDepositSuccess, onDepositError]);
+  }, [enabled, wallet, supportedTokens, autoSweepIdleBalances, pollIntervalMs, onDepositSuccess, onDepositError]);
 
   return {
     isDepositing,

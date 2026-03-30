@@ -31,7 +31,7 @@ The repository currently contains two client applications:
 
 ### Mobile app
 
-- Expo shell and basic StarkPay home screen
+- Expo shell and basic Otterpay home screen
 - StarkZap native provider scaffolding
 - mirrored hook structure for dashboard, lending, history, yield, and confidential features
 
