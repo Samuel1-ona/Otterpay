@@ -1,9 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 import { WalletInterface, Amount, Token } from 'starkzap';
-import { num, hash } from 'starknet';
+import { num, hash, TransactionExecutionStatus } from 'starknet';
 
 // The Transfer event name as defined in ERC20
 const TRANSFER_EVENT_SELECTOR = hash.getSelectorFromName('Transfer');
+const FAILED_SWEEP_RETRY_COOLDOWN_MS = 10 * 60 * 1000;
+
+type AutoYieldReceipt = {
+  execution_status?: string;
+  finality_status?: string;
+  revert_reason?: string;
+  isSuccess?: () => boolean;
+  isReverted?: () => boolean;
+  value?: unknown;
+};
+
+type AutoYieldTx = {
+  hash: string;
+  wait: () => Promise<void>;
+  receipt: () => Promise<AutoYieldReceipt>;
+};
 
 export interface AutoYieldOptions {
   wallet: WalletInterface | null;
@@ -45,6 +61,9 @@ export const useAutoYield = ({
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const isPollingRef = useRef(false);
   const supportedLendingTokensRef = useRef<Set<string>>(new Set());
+  const lastFailedSweepRef = useRef<
+    Map<string, { amountRaw: string; failedAt: number; message: string }>
+  >(new Map());
 
   useEffect(() => {
     if (!enabled || !wallet || supportedTokens.length === 0) {
@@ -95,6 +114,21 @@ export const useAutoYield = ({
           continue;
         }
 
+        const failedSweep = lastFailedSweepRef.current.get(token.address.toLowerCase());
+        const depositAmountRaw = depositAmount.toBase().toString();
+        if (
+          failedSweep &&
+          BigInt(depositAmountRaw) <= BigInt(failedSweep.amountRaw) &&
+          Date.now() - failedSweep.failedAt < FAILED_SWEEP_RETRY_COOLDOWN_MS
+        ) {
+          console.log(
+            `[AutoYield] Skipping ${token.symbol} retry for ${
+              Math.ceil((FAILED_SWEEP_RETRY_COOLDOWN_MS - (Date.now() - failedSweep.failedAt)) / 60000)
+            } more minute(s): ${failedSweep.message}`
+          );
+          continue;
+        }
+
         console.log(
           `[AutoYield] Sweeping ${depositAmount.toFormatted()} ${token.symbol} into Vesu (${reason}).`
         );
@@ -111,15 +145,27 @@ export const useAutoYield = ({
           };
 
           setLastSubmittedDeposit(update);
-          await tx.wait();
+          const receipt = await waitForAutoYieldReceipt(tx);
           setLastConfirmedDeposit(update);
+          lastFailedSweepRef.current.delete(token.address.toLowerCase());
           depositedAny = true;
+
+          if (receipt?.finality_status) {
+            console.log(
+              `[AutoYield] Confirmed ${token.symbol} auto-deposit at ${receipt.finality_status}: ${tx.hash}`
+            );
+          }
 
           if (onDepositSuccess) {
             onDepositSuccess(token, depositAmount, tx.hash);
           }
         } catch (depositErr: unknown) {
           const error = depositErr instanceof Error ? depositErr : new Error('Auto-deposit failed');
+          lastFailedSweepRef.current.set(token.address.toLowerCase(), {
+            amountRaw: depositAmountRaw,
+            failedAt: Date.now(),
+            message: error.message,
+          });
           console.error(`[AutoYield] Failed to auto-deposit ${token.symbol}:`, error);
           setLastDepositError(error.message);
           if (onDepositError) onDepositError(error);
@@ -283,4 +329,95 @@ function getGasReserve(token: Token): Amount {
     default:
       return Amount.fromRaw(0n, token);
   }
+}
+
+async function waitForAutoYieldReceipt(tx: AutoYieldTx): Promise<AutoYieldReceipt | null> {
+  try {
+    await tx.wait();
+  } catch (error) {
+    const receipt = await readAutoYieldReceipt(tx);
+    if (isSuccessfulReceipt(receipt)) {
+      return receipt;
+    }
+
+    throw buildAutoYieldReceiptError(error, receipt);
+  }
+
+  return await readAutoYieldReceipt(tx);
+}
+
+async function readAutoYieldReceipt(tx: AutoYieldTx): Promise<AutoYieldReceipt | null> {
+  try {
+    return await tx.receipt();
+  } catch {
+    return null;
+  }
+}
+
+function isSuccessfulReceipt(receipt: AutoYieldReceipt | null): boolean {
+  if (!receipt) return false;
+  if (typeof receipt.isSuccess === 'function') {
+    return receipt.isSuccess();
+  }
+
+  return receipt.execution_status === TransactionExecutionStatus.SUCCEEDED;
+}
+
+function isRevertedReceipt(receipt: AutoYieldReceipt | null): boolean {
+  if (!receipt) return false;
+  if (typeof receipt.isReverted === 'function') {
+    return receipt.isReverted();
+  }
+
+  return receipt.execution_status === TransactionExecutionStatus.REVERTED;
+}
+
+function buildAutoYieldReceiptError(
+  error: unknown,
+  receipt: AutoYieldReceipt | null
+): Error {
+  if (isRevertedReceipt(receipt)) {
+    const finality = receipt?.finality_status ?? 'UNKNOWN_FINALITY';
+    const reason = extractAutoYieldRevertReason(receipt);
+    const message = reason
+      ? `Auto-deposit reverted on-chain (${finality}): ${reason}`
+      : `Auto-deposit reverted on-chain (${finality}).`;
+
+    return new Error(message);
+  }
+
+  if (error instanceof Error) {
+    return error;
+  }
+
+  return new Error('Auto-deposit failed');
+}
+
+function extractAutoYieldRevertReason(receipt: AutoYieldReceipt | null): string | null {
+  if (!receipt) return null;
+
+  const directReason = getStringField(receipt, 'revert_reason') ?? getStringField(receipt, 'reason');
+  if (directReason) {
+    return directReason;
+  }
+
+  const nestedValue = receipt.value;
+  return (
+    getStringField(nestedValue, 'revert_reason') ??
+    getStringField(nestedValue, 'reason')
+  );
+}
+
+function getStringField(value: unknown, field: string): string | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const fieldValue = (value as Record<string, unknown>)[field];
+  if (typeof fieldValue !== 'string') {
+    return null;
+  }
+
+  const trimmedValue = fieldValue.trim();
+  return trimmedValue.length > 0 ? trimmedValue : null;
 }

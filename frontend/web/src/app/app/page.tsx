@@ -98,6 +98,7 @@ export default function Dashboard() {
     const [showReceiveModal, setShowReceiveModal] = useState(false);
     const [showSupplyModal, setShowSupplyModal] = useState(false);
     const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+    const [showNetworkModal, setShowNetworkModal] = useState(false);
     const [showConfidentialSetupModal, setShowConfidentialSetupModal] =
         useState(false);
     const [showConfidentialFundModal, setShowConfidentialFundModal] =
@@ -156,6 +157,7 @@ export default function Dashboard() {
         type: "idle" | "loading" | "success" | "error";
         message?: string;
     }>({ type: "idle" });
+    const [areBalancesVisible, setAreBalancesVisible] = useState(true);
     const [activeTab, setActiveTab] = useState<
         "home" | "yield" | "private" | "activity"
     >("home");
@@ -321,6 +323,7 @@ export default function Dashboard() {
     };
 
     const handleNetworkSwitch = (nextNetwork: typeof network) => {
+        setShowNetworkModal(false);
         if (nextNetwork === network) return;
 
         clearConfidential();
@@ -348,6 +351,19 @@ export default function Dashboard() {
         setSelectedConfidentialAssetAddress(null);
         setNetwork(nextNetwork);
     };
+
+    useEffect(() => {
+        if (!showNetworkModal) return;
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") {
+                setShowNetworkModal(false);
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [showNetworkModal]);
 
     const handleSelectConfidentialToken = (tokenAddress: string) => {
         if (tokenAddress === selectedConfidentialAssetAddress) return;
@@ -688,7 +704,7 @@ export default function Dashboard() {
     };
 
     return (
-        <div className="min-h-screen flex" style={{ backgroundColor: "#F5EFE4" }}>
+        <div className="dashboard-page min-h-screen flex" style={{ backgroundColor: "#F5EFE4" }}>
 
             {/* ── Desktop Sidebar ── */}
             <aside
@@ -708,7 +724,7 @@ export default function Dashboard() {
                             OtterPay
                         </h1>
                     </Link>
-                    <p className="text-sm font-bold mt-0.5" style={{ color: "#4A9EB5" }}>
+                    <p className="text-sm font-bold mt-0.5" style={{ color: "#FDFAF4" }}>
                         Yield-bearing payments
                     </p>
                 </div>
@@ -731,7 +747,7 @@ export default function Dashboard() {
                                 backgroundColor:
                                     activeTab === tab.id ? "#C8960A" : "transparent",
                                 color:
-                                    activeTab === tab.id ? "#0D1B4B" : "#4A9EB5",
+                                    activeTab === tab.id ? "#0D1B4B" : "#FDFAF4",
                                 borderTopWidth: "0",
                                 borderRightWidth: "0",
                                 borderBottomWidth: "0",
@@ -781,7 +797,7 @@ export default function Dashboard() {
                             className="w-full py-3 font-black text-xs transition-all active:scale-95"
                             style={{
                                 backgroundColor: "transparent",
-                                color: "#4A9EB5",
+                                color: "#FDFAF4",
                                 borderColor: "#4A9EB5",
                                 borderWidth: "3px",
                                 boxShadow: "4px 4px 0px rgba(13,27,75,0.3)",
@@ -794,7 +810,7 @@ export default function Dashboard() {
                     ) : (
                         <div
                             className="flex items-center space-x-2 text-xs font-black"
-                            style={{ color: "#4A9EB5" }}
+                            style={{ color: "#FDFAF4" }}
                         >
                             <div
                                 className="h-2 w-2 rounded-full animate-pulse shrink-0"
@@ -825,11 +841,53 @@ export default function Dashboard() {
 
             {/* ── Main Content ── */}
             <main
-                className="flex-1 flex flex-col p-6 md:p-10 w-full gap-6 max-w-2xl mx-auto"
+                className="flex-1 flex flex-col p-5 md:p-8 w-full gap-5 max-w-2xl mx-auto"
                 style={{ backgroundColor: "#F5EFE4" }}
             >
+            <button
+                type="button"
+                onClick={() => setShowNetworkModal(true)}
+                aria-haspopup="dialog"
+                aria-expanded={showNetworkModal}
+                className="fixed top-4 right-4 md:top-6 md:right-6 z-40 w-[7rem] p-2.5 text-left"
+                style={{
+                    backgroundColor: showNetworkModal ? "#C8960A" : "#0D1B4B",
+                    color: showNetworkModal ? "#0D1B4B" : "#FDFAF4",
+                    borderColor: "#C8960A",
+                    borderWidth: "4px",
+                    boxShadow: "8px 8px 0px rgba(13, 27, 75, 0.28)",
+                }}
+            >
+                <span
+                    className="block text-[9px] font-black uppercase tracking-[0.35em]"
+                    style={{
+                        color: showNetworkModal
+                            ? "#0D1B4B"
+                            : "#C8960A",
+                    }}
+                >
+                    Network
+                </span>
+                <span className="mt-1 block text-sm font-black">
+                    {activeNetworkConfig.shortLabel}
+                </span>
+                <span
+                    className="mt-1 block text-[10px] font-bold leading-tight"
+                    style={{
+                        color:
+                            showNetworkModal
+                                ? "#0D1B4B"
+                                : activeNetworkConfig.deprecated
+                                  ? "#C8960A"
+                                  : "#4A9EB5",
+                    }}
+                >
+                    Tap to switch
+                </span>
+            </button>
+
             {/* Header - Mobile Only */}
-            <header className="flex md:hidden justify-between items-center">
+            <header className="flex md:hidden justify-between items-center pr-36">
                 <Link href="/" className="hover:opacity-80 transition-opacity">
                     <h1
                         className="text-4xl font-black tracking-tighter"
@@ -885,124 +943,202 @@ export default function Dashboard() {
                 </div>
             </header>
 
-            <section
-                className="p-5 space-y-4"
-                style={{
-                    backgroundColor: "#FDFAF4",
-                    borderColor: "#0D1B4B",
-                    borderWidth: "4px",
-                    boxShadow: "8px 8px 0px rgba(13, 27, 75, 0.2)",
-                }}
-            >
-                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                    <div className="space-y-2">
-                        <p
-                            className="text-[10px] font-black uppercase tracking-[0.3em]"
-                            style={{ color: "#0D1B4B" }}
-                        >
-                            Network
-                        </p>
-                        <div className="flex items-center gap-2 flex-wrap">
-                            <h2
-                                className="text-2xl font-black"
-                                style={{ color: "#0D1B4B" }}
-                            >
-                                {activeNetworkConfig.label}
-                            </h2>
-                            <span
-                                className="px-2 py-1 text-[10px] font-black uppercase tracking-wider"
-                                style={{
-                                    backgroundColor: activeNetworkConfig.deprecated
-                                        ? "#C8960A"
-                                        : "#1B7A4E",
-                                    color: "#0D1B4B",
-                                    borderColor: "#0D1B4B",
-                                    borderWidth: "2px",
-                                }}
-                            >
-                                {activeNetworkConfig.deprecated
-                                    ? "Testing Only"
-                                    : "Production"}
-                            </span>
-                        </div>
-                        <p
-                            className="text-sm font-bold max-w-xl"
-                            style={{ color: "#0D1B4B" }}
-                        >
-                            {activeNetworkConfig.tagline}
-                        </p>
-                        <p
-                            className="text-[11px] font-black uppercase tracking-wider"
-                            style={{ color: "#1B7A4E" }}
-                        >
-                            {activeNetworkConfig.tokens.length} ERC20 presets ·{" "}
-                            {
-                                activeNetworkConfig.tokens.filter(
-                                    (token) => token.tongoContractAddress != null,
-                                ).length
-                            }{" "}
-                            confidential vaults
-                        </p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 md:min-w-[320px]">
-                        {OTTERPAY_NETWORK_ORDER.map((networkOption) => {
-                            const optionConfig =
-                                getOtterpayNetworkConfig(networkOption);
-                            const isSelected = networkOption === network;
-
-                            return (
-                                <button
-                                    key={networkOption}
-                                    type="button"
-                                    onClick={() =>
-                                        handleNetworkSwitch(networkOption)
-                                    }
-                                    className="p-3 text-left transition-all"
-                                    style={{
-                                        backgroundColor: isSelected
-                                            ? "#C8960A"
-                                            : "#4A9EB5",
-                                        color: "#0D1B4B",
-                                        borderColor: "#0D1B4B",
-                                        borderWidth: "3px",
-                                        boxShadow: isSelected
-                                            ? "4px 4px 0px rgba(13, 27, 75, 0.3)"
-                                            : "2px 2px 0px rgba(13, 27, 75, 0.2)",
-                                    }}
-                                >
-                                    <p className="text-sm font-black">
-                                        {optionConfig.shortLabel}
-                                    </p>
-                                    <p className="mt-1 text-[11px] font-bold leading-snug">
-                                        {optionConfig.deprecated
-                                            ? "Deprecated soon. Use only for testing."
-                                            : "Live balances, live payments."}
-                                    </p>
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                {activeNetworkConfig.warning && (
+            {showNetworkModal && (
+                <div
+                    className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-24 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+                    onClick={() => setShowNetworkModal(false)}
+                >
                     <div
-                        className="p-4 text-xs font-black"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Choose network"
+                        className="w-full max-w-lg p-6 space-y-5"
+                        onClick={(event) => event.stopPropagation()}
                         style={{
-                            backgroundColor: "#C8960A",
-                            color: "#0D1B4B",
+                            backgroundColor: "#FDFAF4",
                             borderColor: "#0D1B4B",
-                            borderWidth: "3px",
+                            borderWidth: "5px",
+                            boxShadow: "12px 12px 0px rgba(13, 27, 75, 0.3)",
                         }}
                     >
-                        {activeNetworkConfig.warning}
+                        <div className="flex items-start justify-between gap-4">
+                            <div className="space-y-2">
+                                <p
+                                    className="text-[10px] font-black uppercase tracking-[0.35em]"
+                                    style={{ color: "#0D1B4B" }}
+                                >
+                                    Switch Network
+                                </p>
+                                <div className="space-y-1">
+                                    <h2
+                                        className="text-2xl font-black"
+                                        style={{ color: "#0D1B4B" }}
+                                    >
+                                        Choose your environment
+                                    </h2>
+                                    <p
+                                        className="text-sm font-bold leading-snug"
+                                        style={{ color: "#0D1B4B" }}
+                                    >
+                                        Mainnet is for live balances and real
+                                        payments. Sepolia stays available for
+                                        testing while it lasts.
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setShowNetworkModal(false)}
+                                className="p-1 hover:opacity-70 font-bold"
+                                style={{ color: "#0D1B4B" }}
+                            >
+                                <CloseIcon />
+                            </button>
+                        </div>
+
+                        <div
+                            className="overflow-hidden"
+                            style={{
+                                backgroundColor: "#0D1B4B",
+                                borderColor: "#0D1B4B",
+                                borderWidth: "3px",
+                            }}
+                        >
+                            <div className="network-ticker-track py-2 text-[11px] font-black uppercase tracking-[0.25em] whitespace-nowrap">
+                                {[0, 1].map((copyIndex) => (
+                                    <React.Fragment key={copyIndex}>
+                                        <span
+                                            className="px-6"
+                                            style={{ color: "#C8960A" }}
+                                        >
+                                            Sepolia will be deprecated soon.
+                                        </span>
+                                        <span
+                                            className="px-6"
+                                            style={{ color: "#FDFAF4" }}
+                                        >
+                                            Treat Sepolia as testing-only and
+                                            switch to Mainnet for the supported
+                                            live experience.
+                                        </span>
+                                    </React.Fragment>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid gap-3">
+                            {OTTERPAY_NETWORK_ORDER.map((networkOption) => {
+                                const optionConfig =
+                                    getOtterpayNetworkConfig(networkOption);
+                                const isSelected =
+                                    networkOption === network;
+                                const optionVaultCount =
+                                    optionConfig.tokens.filter(
+                                        (token) =>
+                                            token.tongoContractAddress != null,
+                                    ).length;
+
+                                return (
+                                    <button
+                                        key={networkOption}
+                                        type="button"
+                                        onClick={() =>
+                                            handleNetworkSwitch(networkOption)
+                                        }
+                                        className="p-4 text-left transition-all"
+                                        style={{
+                                            backgroundColor: isSelected
+                                                ? "#C8960A"
+                                                : "#4A9EB51A",
+                                            color: "#0D1B4B",
+                                            borderColor: "#0D1B4B",
+                                            borderWidth: "4px",
+                                            boxShadow: isSelected
+                                                ? "8px 8px 0px rgba(13, 27, 75, 0.25)"
+                                                : "4px 4px 0px rgba(13, 27, 75, 0.15)",
+                                        }}
+                                    >
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="space-y-1">
+                                                <p className="text-[10px] font-black uppercase tracking-[0.3em]">
+                                                    Starknet
+                                                </p>
+                                                <h3 className="text-xl font-black">
+                                                    {optionConfig.shortLabel}
+                                                </h3>
+                                            </div>
+                                            <span
+                                                className="px-2 py-1 text-[10px] font-black uppercase tracking-wider"
+                                                style={{
+                                                    backgroundColor:
+                                                        optionConfig.deprecated
+                                                            ? "#FDFAF4"
+                                                            : "#1B7A4E",
+                                                    color: "#0D1B4B",
+                                                    borderColor: "#0D1B4B",
+                                                    borderWidth: "2px",
+                                                }}
+                                            >
+                                                {isSelected
+                                                    ? "Selected"
+                                                    : optionConfig.deprecated
+                                                      ? "Deprecated Soon"
+                                                      : "Recommended"}
+                                            </span>
+                                        </div>
+
+                                        <p className="mt-3 text-sm font-bold leading-snug">
+                                            {optionConfig.tagline}
+                                        </p>
+
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                            <span
+                                                className="px-2 py-1 text-[10px] font-black uppercase tracking-wider"
+                                                style={{
+                                                    backgroundColor: "#FDFAF4",
+                                                    color: "#0D1B4B",
+                                                    borderColor: "#0D1B4B",
+                                                    borderWidth: "2px",
+                                                }}
+                                            >
+                                                {optionConfig.tokens.length} presets
+                                            </span>
+                                            <span
+                                                className="px-2 py-1 text-[10px] font-black uppercase tracking-wider"
+                                                style={{
+                                                    backgroundColor: "#FDFAF4",
+                                                    color: "#0D1B4B",
+                                                    borderColor: "#0D1B4B",
+                                                    borderWidth: "2px",
+                                                }}
+                                            >
+                                                {optionVaultCount} vaults
+                                            </span>
+                                        </div>
+
+                                        <p className="mt-3 text-[11px] font-bold leading-snug">
+                                            {optionConfig.deprecated
+                                                ? "Testing only for demos and QA. This network is being phased out soon."
+                                                : "Use this for live payments, live balances, and the production yield flow."}
+                                        </p>
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        <p
+                            className="text-[11px] font-black uppercase tracking-[0.2em]"
+                            style={{ color: "#0D1B4B" }}
+                        >
+                            Current network: {activeNetworkConfig.label}
+                        </p>
                     </div>
-                )}
-            </section>
+                </div>
+            )}
 
             {/* Balance Card */}
             <section
-                className="relative overflow-hidden p-8 shadow-xl"
+                className="relative overflow-hidden p-6 md:p-7 shadow-xl"
                 style={{
                     backgroundColor: "#C8960A",
                     borderColor: "#0D1B4B",
@@ -1011,53 +1147,89 @@ export default function Dashboard() {
                 }}
             >
                 <div className="relative">
-                    <p
-                        className="text-sm font-black uppercase tracking-widest"
-                        style={{ color: "#0D1B4B" }}
-                    >
-                        Total Balance
-                    </p>
-                    <div className="mt-4 flex items-baseline space-x-3">
+                    <div className="flex items-start justify-between gap-4">
+                        <div>
+                            <p
+                                className="text-sm font-black uppercase tracking-widest"
+                                style={{ color: "#0D1B4B" }}
+                            >
+                                Total Balance
+                            </p>
+                            <p
+                                className="mt-1 text-sm font-bold"
+                                style={{ color: "#0D1B4B" }}
+                            >
+                                Tap the eye to hide wallet amounts on this
+                                screen.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() =>
+                                setAreBalancesVisible((current) => !current)
+                            }
+                            aria-pressed={!areBalancesVisible}
+                            aria-label={
+                                areBalancesVisible
+                                    ? "Hide balances"
+                                    : "Show balances"
+                            }
+                            className="shrink-0 p-2"
+                            style={{
+                                backgroundColor: "#FDFAF4",
+                                color: "#0D1B4B",
+                                borderColor: "#0D1B4B",
+                                borderWidth: "3px",
+                                boxShadow:
+                                    "4px 4px 0px rgba(13, 27, 75, 0.18)",
+                            }}
+                        >
+                            {areBalancesVisible ? (
+                                <EyeOffIcon />
+                            ) : (
+                                <EyeIcon />
+                            )}
+                        </button>
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-baseline gap-x-4 gap-y-2">
                         <span
                             className="text-6xl font-black"
                             style={{ color: "#0D1B4B" }}
                         >
-                            ${" "}
-                            {totalBalanceUsd.toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                            })}
+                            {formatMaskedUsd(totalBalanceUsd, areBalancesVisible)}
                         </span>
                         <span
-                            className="text-lg font-bold transition-all hover:scale-110 cursor-default"
+                            className="text-lg font-black cursor-default"
                             style={{ color: "#0D1B4B" }}
                         >
-                            ${" "}
-                            {totalSuppliedUsd.toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                            })}{" "}
+                            {formatMaskedUsd(
+                                totalSuppliedUsd,
+                                areBalancesVisible,
+                            )}{" "}
                             in Vesu
                         </span>
                     </div>
-                    <div className="mt-6 flex flex-wrap gap-3">
+                    <div className="mt-5 flex flex-wrap gap-2.5">
                         {assets.map((asset) => (
                             <div
                                 key={asset.token.address}
-                                className="px-4 py-2 font-bold text-xs text-white"
+                                className="px-3 py-1.5 font-black text-xs"
                                 style={{
                                     backgroundColor: "#1B7A4E",
                                     borderColor: "#0D1B4B",
                                     borderWidth: "3px",
-                                    color: "#0D1B4B",
+                                    color: "#FDFAF4",
                                     boxShadow:
                                         "4px 4px 0px rgba(13, 27, 75, 0.2)",
                                 }}
                             >
                                 {asset.token.symbol}{" "}
-                                {asset.walletBalance
-                                    .add(asset.lendingBalance)
-                                    .toFormatted(true)}
+                                {formatMaskedText(
+                                    asset.walletBalance
+                                        .add(asset.lendingBalance)
+                                        .toFormatted(true),
+                                    areBalancesVisible,
+                                )}
                             </div>
                         ))}
                     </div>
@@ -1069,7 +1241,7 @@ export default function Dashboard() {
                 <button
                     onClick={() => setShowSendModal(true)}
                     disabled={!wallet}
-                    className="flex flex-col items-center justify-center space-y-2 py-7 font-bold transition-transform active:scale-95 disabled:opacity-50"
+                    className="flex flex-col items-center justify-center space-y-2 py-5 font-bold transition-transform active:scale-95 disabled:opacity-50"
                     style={{
                         backgroundColor: "#1B7A4E",
                         borderColor: "#0D1B4B",
@@ -1079,12 +1251,12 @@ export default function Dashboard() {
                     }}
                 >
                     <SendIcon />
-                    <span className="text-sm font-black uppercase tracking-wider">Send</span>
+                    <span className="text-base font-black uppercase tracking-wider">Send</span>
                 </button>
                 <button
                     onClick={() => setShowReceiveModal(true)}
                     disabled={!wallet}
-                    className="flex flex-col items-center justify-center space-y-2 py-7 font-bold transition-transform active:scale-95 disabled:opacity-50"
+                    className="flex flex-col items-center justify-center space-y-2 py-5 font-bold transition-transform active:scale-95 disabled:opacity-50"
                     style={{
                         backgroundColor: "#4A9EB5",
                         borderColor: "#0D1B4B",
@@ -1094,7 +1266,7 @@ export default function Dashboard() {
                     }}
                 >
                     <ReceiveIcon />
-                    <span className="text-sm font-black uppercase tracking-wider">Receive</span>
+                    <span className="text-base font-black uppercase tracking-wider">Receive</span>
                 </button>
                 <button
                     onClick={() => {
@@ -1106,7 +1278,7 @@ export default function Dashboard() {
                         setShowSupplyModal(true);
                     }}
                     disabled={!wallet || liquidAssets.length === 0}
-                    className="flex flex-col items-center justify-center space-y-2 py-7 font-bold transition-transform active:scale-95 disabled:opacity-50"
+                    className="flex flex-col items-center justify-center space-y-2 py-5 font-bold transition-transform active:scale-95 disabled:opacity-50"
                     style={{
                         backgroundColor: "#C8960A",
                         borderColor: "#0D1B4B",
@@ -1116,7 +1288,7 @@ export default function Dashboard() {
                     }}
                 >
                     <TrendingUpIcon />
-                    <span className="text-sm font-black uppercase tracking-wider">
+                    <span className="text-base font-black uppercase tracking-wider">
                         {!wallet ? "Supply" : liquidAssets.length === 0 ? "No Funds" : "Supply"}
                     </span>
                 </button>
@@ -1130,7 +1302,7 @@ export default function Dashboard() {
                         setShowWithdrawModal(true);
                     }}
                     disabled={!wallet || suppliedAssets.length === 0}
-                    className="flex flex-col items-center justify-center space-y-2 py-7 font-bold transition-transform active:scale-95 disabled:opacity-50"
+                    className="flex flex-col items-center justify-center space-y-2 py-5 font-bold transition-transform active:scale-95 disabled:opacity-50"
                     style={{
                         backgroundColor: "#FDFAF4",
                         borderColor: "#0D1B4B",
@@ -1140,7 +1312,7 @@ export default function Dashboard() {
                     }}
                 >
                     <ArrowDownIcon />
-                    <span className="text-sm font-black uppercase tracking-wider">
+                    <span className="text-base font-black uppercase tracking-wider">
                         {!wallet ? "Withdraw" : suppliedAssets.length === 0 ? "No Yield" : "Withdraw"}
                     </span>
                 </button>
@@ -1166,7 +1338,7 @@ export default function Dashboard() {
                     <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id)}
-                        className="py-4 text-sm font-black uppercase tracking-wider transition-all"
+                        className="py-3.5 text-sm font-black uppercase tracking-wider transition-all"
                         style={{
                             backgroundColor:
                                 activeTab === tab.id ? "#0D1B4B" : "#FDFAF4",
@@ -1192,7 +1364,7 @@ export default function Dashboard() {
                     Yield Performance
                 </h3>
                 <div
-                    className="p-4 space-y-4 grain-texture"
+                    className="p-3.5 space-y-4 grain-texture"
                     style={{
                         backgroundColor: "#4A9EB5",
                         borderColor: "#0D1B4B",
@@ -1505,7 +1677,7 @@ export default function Dashboard() {
                     </div>
 
                     <div
-                        className="p-4 space-y-4 overflow-hidden"
+                        className="p-3.5 space-y-4 overflow-hidden"
                         style={{
                             backgroundColor: "#0D1B4B",
                             borderColor: "#1B7A4E",
@@ -1534,13 +1706,13 @@ export default function Dashboard() {
                                         <div className="flex items-center justify-between">
                                             <p
                                                 className="text-[10px] font-black uppercase tracking-wider"
-                                                style={{ color: "#4A9EB5" }}
+                                                style={{ color: "#FDFAF4" }}
                                             >
                                                 Private Asset
                                             </p>
                                             <p
                                                 className="text-[10px] font-black uppercase tracking-wider"
-                                                style={{ color: "#4A9EB5" }}
+                                                style={{ color: "#FDFAF4" }}
                                             >
                                                 {confidentialTokens.length} supported
                                             </p>
@@ -1605,7 +1777,7 @@ export default function Dashboard() {
                                                 Create your private{" "}
                                                 {confidentialToken.symbol} vault
                                             </p>
-                                            <p className="text-sm font-bold" style={{ color: "#4A9EB5" }}>
+                                            <p className="text-sm font-bold" style={{ color: "#FDFAF4" }}>
                                                 Shield balances with Tongo using
                                                 a separate private key from your
                                                 Starknet wallet.
@@ -1691,13 +1863,13 @@ export default function Dashboard() {
                                         <div className="flex items-center justify-between">
                                             <p
                                                 className="text-[10px] font-black uppercase tracking-wider"
-                                                style={{ color: "#4A9EB5" }}
+                                                style={{ color: "#FDFAF4" }}
                                             >
                                                 Private Asset
                                             </p>
                                             <p
                                                 className="text-[10px] font-black uppercase tracking-wider"
-                                                style={{ color: "#4A9EB5" }}
+                                                style={{ color: "#FDFAF4" }}
                                             >
                                                 {confidentialTokens.length} supported
                                             </p>
@@ -1774,7 +1946,7 @@ export default function Dashboard() {
                                                     Vault ready
                                                 </span>
                                             </div>
-                                            <p className="text-sm font-bold" style={{ color: "#4A9EB5" }}>
+                                            <p className="text-sm font-bold" style={{ color: "#FDFAF4" }}>
                                                 Share your Tongo address for
                                                 private incoming transfers. It
                                                 is not your Starknet wallet
@@ -1785,7 +1957,7 @@ export default function Dashboard() {
                                     <button
                                         onClick={handleForgetConfidentialVault}
                                         className="shrink-0 text-[10px] font-black uppercase tracking-wider hover:opacity-70"
-                                        style={{ color: "#4A9EB5" }}
+                                        style={{ color: "#C8960A" }}
                                     >
                                         Forget key
                                     </button>
@@ -2129,13 +2301,13 @@ export default function Dashboard() {
                                     <div className="flex items-center justify-between">
                                         <p
                                             className="text-[10px] font-black uppercase tracking-wider"
-                                            style={{ color: "#4A9EB5" }}
+                                            style={{ color: "#FDFAF4" }}
                                         >
                                             Private Activity
                                         </p>
                                         <p
                                             className="text-[10px] font-bold"
-                                            style={{ color: "#4A9EB5" }}
+                                            style={{ color: "#FDFAF4" }}
                                         >
                                             Recent Tongo actions
                                         </p>
@@ -2360,7 +2532,7 @@ export default function Dashboard() {
                         className="w-full py-4 font-black text-sm shadow-xl transition-all hover:shadow-2xl active:scale-95"
                         style={{
                             backgroundColor: "#0D1B4B",
-                            color: "#4A9EB5",
+                            color: "#FDFAF4",
                             borderColor: "#4A9EB5",
                             borderWidth: "4px",
                             boxShadow: "8px 8px 0px rgba(13, 27, 75, 0.3)",
@@ -2691,7 +2863,7 @@ export default function Dashboard() {
                             className="w-full py-4 font-black text-sm transition-all active:scale-95"
                             style={{
                                 backgroundColor: "#0D1B4B",
-                                color: "#4A9EB5",
+                                color: "#FDFAF4",
                                 borderColor: "#4A9EB5",
                                 borderWidth: "3px",
                                 boxShadow: "6px 6px 0px rgba(13, 27, 75, 0.3)",
@@ -3461,7 +3633,7 @@ export default function Dashboard() {
                             className="w-full py-4 font-black text-sm transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-lg"
                             style={{
                                 backgroundColor: "#0D1B4B",
-                                color: "#4A9EB5",
+                                color: "#FDFAF4",
                                 borderColor: "#4A9EB5",
                                 borderWidth: "3px",
                                 boxShadow: "6px 6px 0px rgba(13, 27, 75, 0.3)",
@@ -3821,7 +3993,7 @@ export default function Dashboard() {
                             className="w-full py-4 font-black text-sm transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-lg"
                             style={{
                                 backgroundColor: "#0D1B4B",
-                                color: "#4A9EB5",
+                                color: "#FDFAF4",
                                 borderColor: "#4A9EB5",
                                 borderWidth: "3px",
                                 boxShadow: "6px 6px 0px rgba(13, 27, 75, 0.3)",
@@ -3861,6 +4033,19 @@ function formatConfidentialActivityType(type: string): string {
 function truncateMiddle(value: string, start: number, end: number): string {
     if (value.length <= start + end + 3) return value;
     return `${value.slice(0, start)}...${value.slice(-end)}`;
+}
+
+function formatMaskedUsd(value: number, visible: boolean): string {
+    if (!visible) return "$••••••";
+
+    return `$ ${value.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    })}`;
+}
+
+function formatMaskedText(value: string, visible: boolean): string {
+    return visible ? value : "••••";
 }
 
 // Simple Icons
@@ -3986,6 +4171,44 @@ function HistoryIcon() {
         >
             <circle cx="12" cy="12" r="10" />
             <polyline points="12 6 12 12 16 14" />
+        </svg>
+    );
+}
+
+function EyeIcon() {
+    return (
+        <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" />
+            <circle cx="12" cy="12" r="3" />
+        </svg>
+    );
+}
+
+function EyeOffIcon() {
+    return (
+        <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <path d="M17.94 17.94A10.9 10.9 0 0 1 12 19C5 19 1 12 1 12a21.66 21.66 0 0 1 5.06-5.94" />
+            <path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.8 21.8 0 0 1-3.16 4.19" />
+            <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88" />
+            <path d="M1 1l22 22" />
         </svg>
     );
 }
