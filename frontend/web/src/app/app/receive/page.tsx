@@ -11,7 +11,7 @@ export default function ReceivePage() {
         >
             <header className="flex items-center space-x-4">
                 <Link
-                    href="/"
+                    href="/app"
                     className="p-2 font-bold hover:opacity-70 transition-all"
                     style={{
                         backgroundColor: "#4A9EB5",

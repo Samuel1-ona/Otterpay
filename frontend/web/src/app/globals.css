@@ -1,26 +1,83 @@
+@import url("https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=VT323&display=swap");
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+    /* OtterPay Mature Brutalist Palette */
+    --color-gold: #c8960a;       /* Antique Gold */
+    --color-navy: #0d1b4b;       /* Midnight Navy */
+    --color-green: #1b7a4e;      /* Forest Green */
+    --color-teal: #4a9eb5;       /* Steel Teal */
+    --color-ivory: #fdfaf4;      /* Warm Ivory (cards) */
+    --color-parchment: #f5efe4;  /* Parchment (page bg) */
+
+    /* Base colors */
+    --background: #f5efe4;
+    --foreground: #0d1b4b;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --font-sans: "Fredoka", var(--font-geist-sans), sans-serif;
+    --font-mono: var(--font-geist-mono);
+    --font-display: "Fredoka", var(--font-geist-sans), sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+    :root {
+        --background: #f5efe4;
+        --foreground: #0d1b4b;
+    }
+}
+
+/* Grain texture overlay for Poolside sections */
+@supports (background-image: url("data:image/svg+xml")) {
+    .grain-texture {
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' result='noise' /%3E%3CfeColorMatrix in='noise' type='saturate' values='0' /%3E%3C/filter%3E%3Crect width='400' height='400' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: "Fredoka", Arial, sans-serif;
+    font-weight: 500;
+}
+
+/* Aquatic Brutalism: Thick Deep Sea blue outlines with hard drop shadows */
+button,
+input,
+select,
+textarea {
+    border: 4px solid var(--color-navy) !important;
+    font-family: "Fredoka", Arial, sans-serif;
+    font-weight: 600;
+    box-shadow: 6px 6px 0px rgba(13, 27, 75, 0.3) !important;
+}
+
+/* Remove default focus rings and add custom outlines */
+button:focus,
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    box-shadow:
+        6px 6px 0px rgba(13, 27, 75, 0.5),
+        0 0 0 3px var(--color-gold) !important;
+}
+
+/* Smooth transitions for all interactive elements */
+button,
+a {
+    transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 }

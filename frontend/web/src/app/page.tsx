@@ -1,1856 +1,917 @@
-'use client';
+import Image from "next/image";
+import Link from "next/link";
+import mascotImg from "./assets/mascot.png";
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { useStarkZap } from '@/providers/StarkZapProvider';
-import { useDashboard } from '@/hooks/useDashboard';
-import { usePrivy } from '@privy-io/react-auth';
-import { useAutoYield } from '@/hooks/useAutoYield';
-import { useTokens } from '@/hooks/useTokens';
-import { useLending } from '@/hooks/useLending';
-import { fromAddress } from 'starkzap';
-import {
-  generateConfidentialPrivateKey,
-  getConfidentialTokenConfig,
-  isValidConfidentialPrivateKey,
-  parseConfidentialRecipientInput,
-  useConfidential,
-} from '@/hooks/useConfidential';
-
-export default function Dashboard() {
-  const { wallet, connect, connectWithCartridge, isLoading: isConnecting } = useStarkZap();
-  const {
-    assets,
-    totalBalanceUsd,
-    totalSuppliedUsd,
-    history,
-    loading,
-    error: dashboardError,
-    refresh,
-    supportedTokens,
-  } = useDashboard();
-  const { login, logout, authenticated, user, getAccessToken, ready } = usePrivy();
-  const { send, loading: isSending } = useTokens();
-  const { supply, withdraw, withdrawMax, loading: isLendingAction } = useLending();
-  const {
-    init: initConfidential,
-    clear: clearConfidential,
-    refresh: refreshConfidential,
-    fund: fundConfidential,
-    transfer: transferConfidential,
-    withdraw: withdrawConfidential,
-    rollover: rolloverConfidential,
-    exit: exitConfidential,
-    address: confidentialAddress,
-    recipientJson: confidentialRecipientJson,
-    activity: confidentialActivity,
-    activeBalance: confidentialActiveBalance,
-    pendingBalance: confidentialPendingBalance,
-    isInitialized: isConfidentialInitialized,
-    loading: isConfidentialLoading,
-    error: confidentialError,
-  } = useConfidential();
-  const availableWalletUsd = Math.max(totalBalanceUsd - totalSuppliedUsd, 0);
-  const suppliedAssets = assets.filter((asset) => !asset.lendingBalance.isZero());
-  const liquidAssets = assets.filter((asset) => !asset.walletBalance.isZero());
-  const confidentialChainLiteral = wallet?.getChainId().toLiteral() ?? null;
-  const confidentialToken = useMemo(
-    () =>
-      supportedTokens.find((token) => getConfidentialTokenConfig(confidentialChainLiteral || '', token)) ?? null,
-    [supportedTokens, confidentialChainLiteral]
-  );
-  const confidentialConfig = useMemo(
-    () =>
-      confidentialToken && confidentialChainLiteral
-        ? getConfidentialTokenConfig(confidentialChainLiteral, confidentialToken)
-        : null,
-    [confidentialChainLiteral, confidentialToken]
-  );
-  const confidentialStorageKey = useMemo(() => {
-    if (!wallet || !confidentialConfig) return null;
-    return `starkpay:confidential:${wallet.address.toLowerCase()}:${confidentialConfig.contractAddress.toLowerCase()}`;
-  }, [wallet, confidentialConfig]);
-  const autoYieldStorageKey = useMemo(() => {
-    if (!wallet) return null;
-    return `starkpay:auto-yield:${wallet.address.toLowerCase()}`;
-  }, [wallet]);
-  const confidentialHasPending =
-    !!confidentialPendingBalance && !confidentialPendingBalance.isZero();
-  const confidentialHistoryPreview = confidentialActivity.slice(0, 4);
-
-  // Modal State
-  const [showSendModal, setShowSendModal] = useState(false);
-  const [showReceiveModal, setShowReceiveModal] = useState(false);
-  const [showSupplyModal, setShowSupplyModal] = useState(false);
-  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
-  const [showConfidentialSetupModal, setShowConfidentialSetupModal] = useState(false);
-  const [showConfidentialFundModal, setShowConfidentialFundModal] = useState(false);
-  const [showConfidentialSendModal, setShowConfidentialSendModal] = useState(false);
-  const [showConfidentialWithdrawModal, setShowConfidentialWithdrawModal] = useState(false);
-  
-  // Transaction State
-  const [selectedAssetAddress, setSelectedAssetAddress] = useState<string | null>(null);
-  const [selectedSupplyAssetAddress, setSelectedSupplyAssetAddress] = useState<string | null>(null);
-  const [selectedYieldAssetAddress, setSelectedYieldAssetAddress] = useState<string | null>(null);
-  const [recipient, setRecipient] = useState('');
-  const [amount, setAmount] = useState('');
-  const [status, setStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ type: 'idle' });
-  const [supplyAmount, setSupplyAmount] = useState('');
-  const [supplyStatus, setSupplyStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ type: 'idle' });
-  const [withdrawAmount, setWithdrawAmount] = useState('');
-  const [withdrawStatus, setWithdrawStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ type: 'idle' });
-  const [autoYieldOverrides, setAutoYieldOverrides] = useState<Record<string, boolean>>({});
-  const [confidentialSetupMode, setConfidentialSetupMode] = useState<'create' | 'import'>('create');
-  const [confidentialPrivateKeyInput, setConfidentialPrivateKeyInput] = useState('');
-  const [confidentialFundAmount, setConfidentialFundAmount] = useState('');
-  const [confidentialSendAmount, setConfidentialSendAmount] = useState('');
-  const [confidentialSendRecipient, setConfidentialSendRecipient] = useState('');
-  const [confidentialWithdrawAmount, setConfidentialWithdrawAmount] = useState('');
-  const [confidentialWithdrawRecipient, setConfidentialWithdrawRecipient] = useState('');
-  const [confidentialStatus, setConfidentialStatus] = useState<{
-    type: 'idle' | 'loading' | 'success' | 'error';
-    message?: string;
-  }>({ type: 'idle' });
-  const selectedAsset =
-    assets.find((asset) => asset.token.address === selectedAssetAddress) ??
-    assets[0] ??
-    null;
-  const selectedSupplyAsset =
-    liquidAssets.find((asset) => asset.token.address === selectedSupplyAssetAddress) ??
-    liquidAssets[0] ??
-    null;
-  const selectedYieldAsset =
-    suppliedAssets.find((asset) => asset.token.address === selectedYieldAssetAddress) ??
-    suppliedAssets[0] ??
-    null;
-  const storedConfidentialKey =
-    confidentialStorageKey && typeof window !== 'undefined'
-      ? window.localStorage.getItem(confidentialStorageKey)
-      : null;
-  const autoYieldEnabled =
-    autoYieldStorageKey != null
-      ? autoYieldOverrides[autoYieldStorageKey] ?? readStoredAutoYieldPreference(autoYieldStorageKey)
-      : false;
-
-  const {
-    isDepositing: isAutoYielding,
-    lastSubmittedDeposit,
-    lastConfirmedDeposit,
-    lastDepositError,
-  } = useAutoYield({
-    wallet,
-    supportedTokens,
-    enabled: autoYieldEnabled,
-    autoSweepIdleBalances: autoYieldEnabled,
-    onDepositSuccess: (token, amount) => {
-      console.log(`Successfully auto-deposited ${amount.toFormatted()} ${token.symbol}`);
-      refresh();
-    }
-  });
-
-  const yieldStatusLabel = isAutoYielding
-    ? 'Supplying to Vesu'
-    : autoYieldEnabled
-      ? 'Watching incoming funds'
-      : totalSuppliedUsd > 0
-        ? 'Yield active in Vesu'
-        : 'Auto-yield is off';
-
-  const yieldStatusDetail = lastDepositError
-    ? `Last auto-supply failed: ${lastDepositError}`
-    : lastConfirmedDeposit
-      ? `Confirmed: ${lastConfirmedDeposit.amountLabel} ${lastConfirmedDeposit.tokenSymbol} at ${new Date(lastConfirmedDeposit.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-      : lastSubmittedDeposit
-        ? `Pending confirmation: ${lastSubmittedDeposit.amountLabel} ${lastSubmittedDeposit.tokenSymbol}`
-        : autoYieldEnabled
-          ? 'New incoming funds and eligible idle balances sweep into Vesu automatically while keeping a small fee reserve in the wallet.'
-          : 'Keep this off for manual supply, or turn it on to sweep incoming funds into Vesu automatically.';
-
-  const autoYieldModeLabel = autoYieldEnabled ? 'ON' : 'OFF';
-
-  useEffect(() => {
-    if (!wallet) {
-      clearConfidential();
-    }
-  }, [wallet, clearConfidential]);
-
-  useEffect(() => {
-    if (!wallet || !confidentialConfig || !confidentialStorageKey || isConfidentialInitialized) {
-      return;
-    }
-
-    const storedKey = window.localStorage.getItem(confidentialStorageKey);
-    if (!storedKey) {
-      return;
-    }
-
-    try {
-      initConfidential(storedKey, confidentialConfig.contractAddress);
-    } catch (err) {
-      console.error('Failed to restore confidential vault:', err);
-      window.localStorage.removeItem(confidentialStorageKey);
-    }
-  }, [
-    wallet,
-    confidentialConfig,
-    confidentialStorageKey,
-    isConfidentialInitialized,
-    initConfidential,
-  ]);
-
-  useEffect(() => {
-    if (!isConfidentialInitialized || !confidentialToken) return;
-
-    refreshConfidential(confidentialToken).catch((err) => {
-      console.error('Failed to refresh confidential vault:', err);
-    });
-  }, [isConfidentialInitialized, confidentialToken, refreshConfidential]);
-
-  useEffect(() => {
-    if (!isConfidentialInitialized || !confidentialToken) return;
-
-    const interval = window.setInterval(() => {
-      refreshConfidential(confidentialToken).catch((err) => {
-        console.error('Failed to refresh confidential vault:', err);
-      });
-    }, 15000);
-
-    return () => window.clearInterval(interval);
-  }, [isConfidentialInitialized, confidentialToken, refreshConfidential]);
-
-  useEffect(() => {
-    const syncWallet = async () => {
-      if (ready && authenticated && user && !wallet && !isConnecting) {
-        try {
-          const token = await getAccessToken();
-          if (token && user) {
-            await connect(token, user.id);
-          }
-        } catch (err) {
-          console.error('Failed to sync Privy wallet with StarkZap:', err);
-        }
-      }
-    };
-
-    syncWallet();
-  }, [ready, authenticated, user, wallet, isConnecting, connect, getAccessToken]);
-
-  const handlePrivyConnect = async () => {
-    if (!authenticated) {
-      login();
-    } else {
-      const token = await getAccessToken();
-      if (token && user) {
-        await connect(token, user.id);
-      }
-    }
-  };
-
-  const handleCartridgeConnect = async () => {
-    try {
-      await connectWithCartridge();
-    } catch (err) {
-      console.error('Cartridge connection failed:', err);
-    }
-  };
-
-  const handleRefreshAll = async () => {
-    await refresh();
-
-    if (isConfidentialInitialized && confidentialToken) {
-      await refreshConfidential(confidentialToken).catch((err) => {
-        console.error('Failed to refresh confidential vault:', err);
-      });
-    }
-  };
-
-  const openConfidentialSetup = (mode: 'create' | 'import') => {
-    setConfidentialSetupMode(mode);
-    setConfidentialPrivateKeyInput(mode === 'create' ? generateConfidentialPrivateKey() : '');
-    setConfidentialStatus({ type: 'idle' });
-    setShowConfidentialSetupModal(true);
-  };
-
-  const handleSend = async () => {
-    if (!selectedAsset || !recipient || !amount) return;
-    setStatus({ type: 'loading', message: 'Initiating transfer...' });
-    try {
-      const tx = await send(selectedAsset.token, fromAddress(recipient), amount);
-      setStatus({ type: 'success', message: `Transfer broadcasted: ${tx.hash.slice(0, 10)}...` });
-      setTimeout(() => {
-        setShowSendModal(false);
-        setStatus({ type: 'idle' });
-        setAmount('');
-        setRecipient('');
-        refresh();
-      }, 3000);
-    } catch (err: unknown) {
-      setStatus({ type: 'error', message: err instanceof Error ? err.message : 'Transfer failed' });
-    }
-  };
-
-  const handleWithdraw = async () => {
-    if (!selectedYieldAsset) return;
-    setWithdrawStatus({ type: 'loading', message: 'Withdrawing from Vesu...' });
-    try {
-      const tx = withdrawAmount.trim()
-        ? await withdraw(selectedYieldAsset.token, withdrawAmount)
-        : await withdrawMax(selectedYieldAsset.token);
-
-      setWithdrawStatus({ type: 'success', message: `Withdrawal broadcasted: ${tx.hash.slice(0, 10)}...` });
-      setTimeout(() => {
-        setShowWithdrawModal(false);
-        setWithdrawStatus({ type: 'idle' });
-        setWithdrawAmount('');
-        refresh();
-      }, 3000);
-    } catch (err: unknown) {
-      setWithdrawStatus({ type: 'error', message: err instanceof Error ? err.message : 'Withdraw failed' });
-    }
-  };
-
-  const handleConfidentialSetup = async () => {
-    if (!confidentialConfig) return;
-
-    const nextPrivateKey = confidentialPrivateKeyInput.trim();
-    if (!isValidConfidentialPrivateKey(nextPrivateKey)) {
-      setConfidentialStatus({
-        type: 'error',
-        message: 'Enter a valid Tongo private key before continuing.',
-      });
-      return;
-    }
-
-    setConfidentialStatus({ type: 'loading', message: 'Setting up your private vault...' });
-    try {
-      initConfidential(nextPrivateKey, confidentialConfig.contractAddress);
-      if (confidentialStorageKey) {
-        window.localStorage.setItem(confidentialStorageKey, nextPrivateKey);
-      }
-      setConfidentialStatus({
-        type: 'success',
-        message:
-          confidentialSetupMode === 'create'
-            ? 'Private vault created. Back up this Tongo key safely.'
-            : 'Private vault restored on this device.',
-      });
-      setTimeout(() => {
-        setShowConfidentialSetupModal(false);
-        setConfidentialStatus({ type: 'idle' });
-      }, 1200);
-    } catch (err: unknown) {
-      setConfidentialStatus({
-        type: 'error',
-        message: err instanceof Error ? err.message : 'Failed to initialize private vault',
-      });
-    }
-  };
-
-  const handleConfidentialFund = async () => {
-    if (!confidentialToken || !confidentialFundAmount) return;
-
-    setConfidentialStatus({ type: 'loading', message: 'Funding your private vault...' });
-    try {
-      const tx = await fundConfidential(confidentialToken, confidentialFundAmount);
-      await tx.wait();
-      await refreshConfidential(confidentialToken);
-      setConfidentialStatus({
-        type: 'success',
-        message: `Private vault funded: ${tx.hash.slice(0, 10)}...`,
-      });
-      setTimeout(() => {
-        setShowConfidentialFundModal(false);
-        setConfidentialFundAmount('');
-        setConfidentialStatus({ type: 'idle' });
-      }, 1200);
-    } catch (err: unknown) {
-      setConfidentialStatus({
-        type: 'error',
-        message: err instanceof Error ? err.message : 'Confidential funding failed',
-      });
-    }
-  };
-
-  const handleConfidentialTransfer = async () => {
-    if (!confidentialToken || !confidentialSendAmount || !confidentialSendRecipient) return;
-
-    setConfidentialStatus({ type: 'loading', message: 'Sending privately...' });
-    try {
-      const recipientId = parseConfidentialRecipientInput(confidentialSendRecipient);
-      const tx = await transferConfidential(
-        confidentialToken,
-        confidentialSendAmount,
-        recipientId
-      );
-      await tx.wait();
-      await refreshConfidential(confidentialToken);
-      setConfidentialStatus({
-        type: 'success',
-        message: `Private transfer confirmed: ${tx.hash.slice(0, 10)}...`,
-      });
-      setTimeout(() => {
-        setShowConfidentialSendModal(false);
-        setConfidentialSendAmount('');
-        setConfidentialSendRecipient('');
-        setConfidentialStatus({ type: 'idle' });
-      }, 1200);
-    } catch (err: unknown) {
-      setConfidentialStatus({
-        type: 'error',
-        message: err instanceof Error ? err.message : 'Confidential transfer failed',
-      });
-    }
-  };
-
-  const handleConfidentialWithdraw = async () => {
-    if (!confidentialToken || !confidentialWithdrawAmount) return;
-
-    setConfidentialStatus({ type: 'loading', message: 'Withdrawing from private vault...' });
-    try {
-      const tx = await withdrawConfidential(
-        confidentialToken,
-        confidentialWithdrawAmount,
-        confidentialWithdrawRecipient
-          ? fromAddress(confidentialWithdrawRecipient)
-          : wallet?.address
-      );
-      await tx.wait();
-      await refreshConfidential(confidentialToken);
-      setConfidentialStatus({
-        type: 'success',
-        message: `Private withdrawal confirmed: ${tx.hash.slice(0, 10)}...`,
-      });
-      setTimeout(() => {
-        setShowConfidentialWithdrawModal(false);
-        setConfidentialWithdrawAmount('');
-        setConfidentialStatus({ type: 'idle' });
-      }, 1200);
-    } catch (err: unknown) {
-      setConfidentialStatus({
-        type: 'error',
-        message: err instanceof Error ? err.message : 'Confidential withdraw failed',
-      });
-    }
-  };
-
-  const handleConfidentialRollover = async () => {
-    if (!confidentialToken) return;
-
-    setConfidentialStatus({ type: 'loading', message: 'Activating pending private balance...' });
-    try {
-      const tx = await rolloverConfidential();
-      await tx.wait();
-      await refreshConfidential(confidentialToken);
-      setConfidentialStatus({
-        type: 'success',
-        message: `Pending balance activated: ${tx.hash.slice(0, 10)}...`,
-      });
-    } catch (err: unknown) {
-      setConfidentialStatus({
-        type: 'error',
-        message: err instanceof Error ? err.message : 'Failed to rollover pending balance',
-      });
-    }
-  };
-
-  const handleConfidentialExit = async () => {
-    if (!wallet || !confidentialToken) return;
-
-    const confirmed = window.confirm(
-      'Exit all active private balance back to your public wallet? Pending balance will still require rollover first.'
-    );
-    if (!confirmed) return;
-
-    setConfidentialStatus({ type: 'loading', message: 'Exiting private vault...' });
-    try {
-      const tx = await exitConfidential(wallet.address);
-      await tx.wait();
-      await refreshConfidential(confidentialToken);
-      setConfidentialStatus({
-        type: 'success',
-        message: `Private vault exited: ${tx.hash.slice(0, 10)}...`,
-      });
-    } catch (err: unknown) {
-      setConfidentialStatus({
-        type: 'error',
-        message: err instanceof Error ? err.message : 'Failed to exit private vault',
-      });
-    }
-  };
-
-  const handleForgetConfidentialVault = () => {
-    if (!confidentialStorageKey) return;
-
-    const confirmed = window.confirm(
-      'Forget the private vault key on this device? You will need the backed-up Tongo key to restore access later.'
-    );
-    if (!confirmed) return;
-
-    window.localStorage.removeItem(confidentialStorageKey);
-    clearConfidential();
-    setConfidentialStatus({ type: 'idle' });
-  };
-
-  const handleSupply = async () => {
-    if (!selectedSupplyAsset || !supplyAmount) return;
-    setSupplyStatus({ type: 'loading', message: 'Supplying to Vesu...' });
-    try {
-      const tx = await supply(selectedSupplyAsset.token, supplyAmount);
-      setSupplyStatus({ type: 'success', message: `Supply broadcasted: ${tx.hash.slice(0, 10)}...` });
-      setTimeout(() => {
-        setShowSupplyModal(false);
-        setSupplyStatus({ type: 'idle' });
-        setSupplyAmount('');
-        refresh();
-      }, 3000);
-    } catch (err: unknown) {
-      setSupplyStatus({ type: 'error', message: err instanceof Error ? err.message : 'Supply failed' });
-    }
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    // Simple visual feedback could go here
-  };
-
-  return (
-    <main className="flex-1 flex flex-col p-6 max-w-lg mx-auto w-full space-y-8">
-      {/* Header */}
-      <header className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">StarkPay</h1>
-          <p className="text-zinc-400 text-sm">Yield-bearing payments</p>
-        </div>
-        <div className="flex items-center space-x-2">
-          {isAutoYielding && (
-            <div className="flex items-center space-x-1.5 px-2 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20">
-              <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-tighter">Yielding...</span>
-            </div>
-          )}
-          {authenticated && (
-            <button 
-              onClick={logout}
-              className="text-[10px] font-bold text-zinc-500 hover:text-red-400 transition-colors uppercase tracking-tighter"
+export default function LandingPage() {
+    return (
+        <div
+            style={{
+                fontFamily: "'Fredoka', sans-serif",
+                backgroundColor: "#F5EFE4",
+                color: "#0D1B4B",
+            }}
+        >
+            {/* ── NAV ── */}
+            <nav
+                className="sticky top-0 z-50 flex items-center justify-between px-6 md:px-12 py-4"
+                style={{
+                    backgroundColor: "#F5EFE4",
+                    borderBottom: "4px solid #0D1B4B",
+                    boxShadow: "0 4px 0px rgba(13,27,75,0.08)",
+                }}
             >
-              Logout
-            </button>
-          )}
-          <button 
-            onClick={handleRefreshAll}
-            disabled={loading}
-            className={`p-2 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white transition-all ${loading ? 'animate-spin' : ''}`}
-          >
-            <RefreshIcon />
-          </button>
-        </div>
-      </header>
-
-      {/* Balance Card */}
-      <section className="relative overflow-hidden rounded-3xl bg-zinc-900 border border-zinc-800 p-8 shadow-2xl">
-        <div className="absolute top-0 right-0 -mt-4 -mr-4 h-24 w-24 rounded-full bg-indigo-500/10 blur-3xl" />
-        <div className="relative">
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Total Balance</p>
-          <div className="mt-2 flex items-baseline space-x-2">
-            <span className="text-5xl font-bold text-white">
-              $ {totalBalanceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </span>
-            <span className="text-indigo-400 text-sm font-medium transition-all hover:scale-105 cursor-default">
-              $ {totalSuppliedUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} in Vesu
-            </span>
-          </div>
-          <div className="mt-6 flex flex-wrap gap-2">
-            {assets.map((asset) => (
-              <div key={asset.token.address} className="px-3 py-1 rounded-full bg-zinc-800/50 border border-zinc-700/50 text-[10px] text-zinc-300">
-                {asset.token.symbol} {asset.walletBalance.add(asset.lendingBalance).toFormatted(true)}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Quick Actions */}
-      <section className="grid grid-cols-2 gap-4">
-        <button 
-          onClick={() => setShowSendModal(true)}
-          disabled={!wallet}
-          className="flex flex-col items-center justify-center space-y-2 py-6 rounded-2xl bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition-all active:scale-95 group disabled:opacity-50"
-        >
-          <div className="p-3 rounded-full bg-indigo-500/10 text-indigo-400 group-hover:bg-indigo-500 group-hover:text-white transition-colors">
-            <SendIcon />
-          </div>
-          <span className="text-sm font-medium text-zinc-300">Send</span>
-        </button>
-        <button 
-          onClick={() => setShowReceiveModal(true)}
-          disabled={!wallet}
-          className="flex flex-col items-center justify-center space-y-2 py-6 rounded-2xl bg-zinc-900 border border-zinc-800 hover:border-purple-500/50 transition-all active:scale-95 group disabled:opacity-50"
-        >
-          <div className="p-3 rounded-full bg-purple-500/10 text-purple-400 group-hover:bg-purple-500 group-hover:text-white transition-colors">
-            <ReceiveIcon />
-          </div>
-          <span className="text-sm font-medium text-zinc-300">Receive</span>
-        </button>
-      </section>
-
-      {wallet && (
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => {
-              setSelectedSupplyAssetAddress(liquidAssets[0]?.token.address ?? null);
-              setSupplyAmount('');
-              setSupplyStatus({ type: 'idle' });
-              setShowSupplyModal(true);
-            }}
-            disabled={liquidAssets.length === 0}
-            className="w-full py-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white font-bold text-sm hover:border-indigo-500/40 hover:bg-zinc-900/80 transition-all disabled:opacity-50"
-          >
-            {liquidAssets.length === 0 ? 'No Liquid Funds To Supply' : 'Supply To Yield'}
-          </button>
-          <button
-            onClick={() => {
-              setSelectedYieldAssetAddress(suppliedAssets[0]?.token.address ?? null);
-              setWithdrawAmount('');
-              setWithdrawStatus({ type: 'idle' });
-              setShowWithdrawModal(true);
-            }}
-            disabled={suppliedAssets.length === 0}
-            className="w-full py-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white font-bold text-sm hover:border-emerald-500/40 hover:bg-zinc-900/80 transition-all disabled:opacity-50"
-          >
-            {suppliedAssets.length === 0 ? 'No Funds In Yield Yet' : 'Withdraw From Yield'}
-          </button>
-        </div>
-      )}
-
-      {/* Yield Section */}
-      <section className="space-y-4">
-        <h3 className="text-sm font-semibold text-zinc-400 px-1">Yield Performance</h3>
-        <div className="rounded-2xl bg-zinc-900/50 border border-zinc-800 p-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 mr-3">
-                <TrendingUpIcon />
-              </div>
-              <div>
-                <p className="text-xs text-zinc-500 leading-none">Net APY</p>
-                <p className="text-sm font-semibold text-emerald-400 mt-1">12.4%</p>
-              </div>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-zinc-500 mb-1">Supplied in Vesu</p>
-              <p className="text-sm font-medium text-white">$ {totalSuppliedUsd.toFixed(2)}</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Wallet Cash</p>
-              <p className="mt-2 text-sm font-semibold text-white">$ {availableWalletUsd.toFixed(2)}</p>
-              <p className="mt-1 text-[11px] text-zinc-500">Kept liquid for spending and fees</p>
-            </div>
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Auto-Yield</p>
-                  <p className={`mt-2 text-sm font-semibold ${autoYieldEnabled ? 'text-emerald-400' : 'text-white'}`}>
-                    {yieldStatusLabel}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={autoYieldEnabled}
-                  aria-label={autoYieldEnabled ? 'Disable auto-yield' : 'Enable auto-yield'}
-                  onClick={() => {
-                    if (!autoYieldStorageKey) return;
-
-                    const nextValue = !autoYieldEnabled;
-                    window.localStorage.setItem(
-                      autoYieldStorageKey,
-                      nextValue ? 'true' : 'false'
-                    );
-                    setAutoYieldOverrides((current) => ({
-                      ...current,
-                      [autoYieldStorageKey]: nextValue,
-                    }));
-                  }}
-                  className={`relative inline-flex h-7 w-12 shrink-0 rounded-full border transition-all ${
-                    autoYieldEnabled
-                      ? 'border-emerald-500/40 bg-emerald-500/20'
-                      : 'border-zinc-700 bg-zinc-900'
-                  }`}
+                <span
+                    className="text-2xl font-black tracking-tight"
+                    style={{ color: "#0D1B4B" }}
                 >
-                  <span
-                    className={`absolute top-1 h-5 w-5 rounded-full shadow-lg transition-all ${
-                      autoYieldEnabled
-                        ? 'left-6 bg-emerald-400 shadow-emerald-500/30'
-                        : 'left-1 bg-zinc-500 shadow-black/40'
-                    }`}
-                  />
-                </button>
-              </div>
-              <div className="mt-3 flex items-center justify-between rounded-xl border border-zinc-800/80 bg-zinc-900/70 px-3 py-2">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                  Preference
+                    Otter<span style={{ color: "#C8960A" }}>Pay</span>
                 </span>
-                <span className={`text-[10px] font-semibold uppercase tracking-[0.2em] ${
-                  autoYieldEnabled ? 'text-emerald-300' : 'text-zinc-400'
-                }`}>
-                  {autoYieldModeLabel}
-                </span>
-              </div>
-              <p className="mt-3 text-[11px] text-zinc-500">
-                {yieldStatusDetail}
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Yield Positions</p>
-              <p className="text-[10px] text-zinc-500">Withdrawable at any time</p>
-            </div>
-            {suppliedAssets.length === 0 ? (
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 text-[11px] text-zinc-500">
-                No confirmed funds are currently shown as supplied in Vesu.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {suppliedAssets.map((asset) => (
-                  <div key={asset.token.address} className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-white">{asset.token.symbol}</p>
-                      <p className="mt-1 text-[11px] text-zinc-500">
-                        In yield: {asset.lendingBalance.toFormatted(true)} {asset.token.symbol}
-                      </p>
-                      <p className="text-[11px] text-zinc-600">
-                        Wallet: {asset.walletBalance.toFormatted(true)} {asset.token.symbol}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setSelectedYieldAssetAddress(asset.token.address);
-                        setWithdrawAmount('');
-                        setWithdrawStatus({ type: 'idle' });
-                        setShowWithdrawModal(true);
-                      }}
-                      className="px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/15 transition-all"
+                <div className="flex items-center gap-3">
+                    <Link
+                        href="/app"
+                        className="hidden md:inline-block text-sm font-bold px-4 py-2 transition-all hover:opacity-80"
+                        style={{ color: "#0D1B4B" }}
                     >
-                      Withdraw
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* Confidential Transfers */}
-      {wallet && (
-        <section className="space-y-4">
-          <div className="flex items-center justify-between px-1">
-            <h3 className="text-sm font-semibold text-zinc-400">Private Transfers</h3>
-            <div className="flex items-center gap-2">
-              {isConfidentialInitialized && confidentialToken && (
-                <button
-                  onClick={() => {
-                    refreshConfidential(confidentialToken).catch((err) => {
-                      console.error('Failed to refresh confidential vault:', err);
-                    });
-                  }}
-                  className="rounded-full border border-zinc-800 bg-zinc-900 p-2 text-zinc-400 transition-all hover:text-white"
-                >
-                  <RefreshIcon />
-                </button>
-              )}
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-cyan-400/80">
-                Tongo
-              </span>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 space-y-4 overflow-hidden relative">
-            <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_55%)] pointer-events-none" />
-
-            {!confidentialConfig || !confidentialToken ? (
-              <div className="relative rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4 text-sm text-zinc-400">
-                Confidential transfers are currently configured for STRK on Starknet Sepolia.
-              </div>
-            ) : !isConfidentialInitialized ? (
-              <div className="relative space-y-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3">
-                    <div className="rounded-2xl bg-cyan-500/10 border border-cyan-500/20 p-3 text-cyan-300">
-                      <VaultIcon />
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-base font-semibold text-white">Create your private STRK vault</p>
-                      <p className="text-sm text-zinc-400">
-                        Shield balances with Tongo using a separate private key from your Starknet wallet.
-                      </p>
-                    </div>
-                  </div>
-                  <span className="shrink-0 rounded-full border border-zinc-700 bg-zinc-950/70 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-                    Setup needed
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => openConfidentialSetup('create')}
-                    className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-4 text-left text-cyan-200 transition-all hover:bg-cyan-500/15"
-                  >
-                    <p className="text-sm font-semibold">Create Vault</p>
-                    <p className="mt-1 text-[11px] text-cyan-200/70">
-                      Generate a new Tongo key and store it on this device.
-                    </p>
-                  </button>
-                  <button
-                    onClick={() => openConfidentialSetup('import')}
-                    className="rounded-2xl border border-zinc-800 bg-zinc-950/70 px-4 py-4 text-left text-zinc-200 transition-all hover:border-zinc-700 hover:bg-zinc-950"
-                  >
-                    <p className="text-sm font-semibold">Import Vault</p>
-                    <p className="mt-1 text-[11px] text-zinc-500">
-                      Restore an existing Tongo private key on this device.
-                    </p>
-                  </button>
-                </div>
-
-                <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-[11px] text-amber-100/80">
-                  Your Tongo key is sensitive and separate from your Starknet wallet. Back it up before sending funds privately.
-                </div>
-              </div>
-            ) : (
-              <div className="relative space-y-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <div className="rounded-2xl bg-cyan-500/10 border border-cyan-500/20 p-3 text-cyan-300">
-                      <VaultIcon />
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <p className="text-base font-semibold text-white">{confidentialConfig.label}</p>
-                        <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
-                          Vault ready
-                        </span>
-                      </div>
-                      <p className="text-sm text-zinc-400">
-                        Share your Tongo address for private incoming transfers. It is not your Starknet wallet address.
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={handleForgetConfidentialVault}
-                    className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300"
-                  >
-                    Forget key
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Active Balance</p>
-                    <p className="mt-2 text-lg font-semibold text-white">
-                      {confidentialActiveBalance
-                        ? `${confidentialActiveBalance.toFormatted(true)} ${confidentialToken.symbol}`
-                        : '--'}
-                    </p>
-                    <p className="mt-1 text-[11px] text-zinc-500">Spendable private STRK</p>
-                  </div>
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Pending Balance</p>
-                    <p className={`mt-2 text-lg font-semibold ${confidentialHasPending ? 'text-amber-300' : 'text-white'}`}>
-                      {confidentialPendingBalance
-                        ? `${confidentialPendingBalance.toFormatted(true)} ${confidentialToken.symbol}`
-                        : '--'}
-                    </p>
-                    <p className="mt-1 text-[11px] text-zinc-500">Needs rollover before it becomes spendable</p>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Tongo Address</p>
-                      <p className="mt-2 break-all font-mono text-xs text-zinc-300">{confidentialAddress}</p>
-                    </div>
-                    <button
-                      onClick={() => copyToClipboard(confidentialAddress || '')}
-                      className="shrink-0 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-300 hover:border-cyan-500/30 hover:text-white"
+                        Docs
+                    </Link>
+                    <Link
+                        href="/app"
+                        className="text-sm font-black px-5 py-2.5 transition-all active:scale-95"
+                        style={{
+                            backgroundColor: "#0D1B4B",
+                            color: "#C8960A",
+                            borderColor: "#0D1B4B",
+                            borderWidth: "3px",
+                            boxShadow: "4px 4px 0px rgba(13,27,75,0.25)",
+                        }}
                     >
-                      Copy
-                    </button>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => copyToClipboard(confidentialRecipientJson || '')}
-                      className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-300 hover:border-zinc-700 hover:text-white"
-                    >
-                      Copy Recipient JSON
-                    </button>
-                    {storedConfidentialKey && (
-                      <button
-                        onClick={() => copyToClipboard(storedConfidentialKey)}
-                        className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-300 hover:border-zinc-700 hover:text-white"
-                      >
-                        Copy Backup Key
-                      </button>
-                    )}
-                  </div>
+                        Launch App →
+                    </Link>
                 </div>
+            </nav>
 
-                {confidentialHasPending && (
-                  <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-100/80">
-                    You have private incoming funds waiting. Run rollover to activate the pending balance before sending or withdrawing it.
-                  </div>
-                )}
-
-                {confidentialStatus.type !== 'idle' && (
-                  <div className={`rounded-2xl border p-4 text-xs font-medium ${
-                    confidentialStatus.type === 'error'
-                      ? 'border-red-500/20 bg-red-500/10 text-red-300'
-                      : confidentialStatus.type === 'success'
-                        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-                        : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-200'
-                  }`}>
-                    {confidentialStatus.message}
-                  </div>
-                )}
-
-                {confidentialError && confidentialStatus.type === 'idle' && (
-                  <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-xs font-medium text-red-300">
-                    {confidentialError.message}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => {
-                      setConfidentialFundAmount('');
-                      setConfidentialStatus({ type: 'idle' });
-                      setShowConfidentialFundModal(true);
-                    }}
-                    className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-4 text-left text-cyan-100 transition-all hover:bg-cyan-500/15"
-                  >
-                    <p className="text-sm font-semibold">Fund Privately</p>
-                    <p className="mt-1 text-[11px] text-cyan-100/70">Approve and move public STRK into Tongo.</p>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setConfidentialSendAmount('');
-                      setConfidentialSendRecipient('');
-                      setConfidentialStatus({ type: 'idle' });
-                      setShowConfidentialSendModal(true);
-                    }}
-                    disabled={!confidentialActiveBalance || confidentialActiveBalance.isZero()}
-                    className="rounded-2xl border border-zinc-800 bg-zinc-950/80 px-4 py-4 text-left text-zinc-100 transition-all hover:border-zinc-700 hover:bg-zinc-950 disabled:opacity-50"
-                  >
-                    <p className="text-sm font-semibold">Private Send</p>
-                    <p className="mt-1 text-[11px] text-zinc-500">Send using a Tongo recipient, not a wallet address.</p>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setConfidentialWithdrawAmount('');
-                      setConfidentialWithdrawRecipient(wallet.address);
-                      setConfidentialStatus({ type: 'idle' });
-                      setShowConfidentialWithdrawModal(true);
-                    }}
-                    disabled={!confidentialActiveBalance || confidentialActiveBalance.isZero()}
-                    className="rounded-2xl border border-zinc-800 bg-zinc-950/80 px-4 py-4 text-left text-zinc-100 transition-all hover:border-zinc-700 hover:bg-zinc-950 disabled:opacity-50"
-                  >
-                    <p className="text-sm font-semibold">Withdraw Publicly</p>
-                    <p className="mt-1 text-[11px] text-zinc-500">Move private STRK back to a Starknet address.</p>
-                  </button>
-                  <button
-                    onClick={handleConfidentialRollover}
-                    disabled={isConfidentialLoading || !confidentialHasPending}
-                    className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-4 text-left text-amber-100 transition-all hover:bg-amber-500/15 disabled:opacity-50"
-                  >
-                    <p className="text-sm font-semibold">Rollover Pending</p>
-                    <p className="mt-1 text-[11px] text-amber-100/70">Activate received private funds for spending.</p>
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between rounded-2xl border border-zinc-800 bg-zinc-950/60 p-3">
-                  <div>
-                    <p className="text-xs font-semibold text-white">Emergency exit</p>
-                    <p className="text-[11px] text-zinc-500">Withdraw all active private balance back to your public wallet.</p>
-                  </div>
-                  <button
-                    onClick={handleConfidentialExit}
-                    disabled={isConfidentialLoading || !confidentialActiveBalance || confidentialActiveBalance.isZero()}
-                    className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 hover:bg-red-500/15 disabled:opacity-50"
-                  >
-                    Exit All
-                  </button>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Private Activity</p>
-                    <p className="text-[10px] text-zinc-500">Recent Tongo actions</p>
-                  </div>
-                  {confidentialHistoryPreview.length === 0 ? (
-                    <div className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-4 text-sm text-zinc-500">
-                      No private activity yet.
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {confidentialHistoryPreview.map((item) => (
+            {/* ── HERO ── */}
+            <section
+                className="relative overflow-hidden"
+                style={{
+                    backgroundColor: "#C8960A",
+                    borderBottom: "5px solid #0D1B4B",
+                }}
+            >
+                <div className="max-w-6xl mx-auto px-6 md:px-12 py-16 md:py-24 flex flex-col md:flex-row items-center gap-10 md:gap-0">
+                    {/* Left: text */}
+                    <div className="flex-1 space-y-6 z-10">
                         <div
-                          key={item.id}
-                          className="flex items-center justify-between rounded-2xl border border-zinc-800 bg-zinc-950/60 p-3"
+                            className="inline-block px-4 py-1.5 text-xs font-black uppercase tracking-widest"
+                            style={{
+                                backgroundColor: "#0D1B4B",
+                                color: "#C8960A",
+                                borderColor: "#0D1B4B",
+                                borderWidth: "3px",
+                                boxShadow: "3px 3px 0px rgba(13,27,75,0.3)",
+                            }}
                         >
-                          <div className="flex items-center gap-3">
-                            <div className={`rounded-full p-2 ${
-                              item.type === 'fund' || item.type === 'transferIn' || item.type === 'rollover'
-                                ? 'bg-emerald-500/10 text-emerald-300'
-                                : 'bg-cyan-500/10 text-cyan-300'
-                            }`}>
-                              {item.type === 'transferOut' || item.type === 'withdraw' || item.type === 'ragequit' ? <ArrowUpIcon /> : <ArrowDownIcon />}
-                            </div>
-                            <div>
-                              <p className="text-xs font-semibold uppercase tracking-wider text-white">
-                                {formatConfidentialActivityType(item.type)}
-                              </p>
-                              <p className="text-[10px] font-mono text-zinc-500">
-                                {item.counterparty ? truncateMiddle(item.counterparty, 8, 6) : item.txHash.slice(0, 10)}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-sm font-semibold text-white">
-                              {item.amount.toFormatted(true)} {confidentialToken.symbol}
-                            </p>
-                            <p className="text-[10px] text-zinc-500">#{item.blockNumber}</p>
-                          </div>
+                            Built on Starknet · Zero Fees
                         </div>
-                      ))}
+                        <h1
+                            className="text-5xl md:text-7xl font-black leading-none tracking-tight"
+                            style={{ color: "#0D1B4B" }}
+                        >
+                            YOUR MONEY
+                            <br />
+                            <span
+                                style={{
+                                    color: "#FDFAF4",
+                                    WebkitTextStroke: "2px #0D1B4B",
+                                }}
+                            >
+                                EARNS
+                            </span>
+                            <br />
+                            WHILE IT
+                            <br />
+                            <span style={{ color: "#1B7A4E" }}>MOVES.</span>
+                        </h1>
+                        <p
+                            className="text-lg md:text-xl font-bold max-w-md leading-snug"
+                            style={{ color: "#0D1B4B" }}
+                        >
+                            Send payments instantly, earn yield on idle
+                            balances, and keep transfers private — all
+                            gasless on Starknet.
+                        </p>
+                        <div className="flex flex-wrap gap-3 pt-2">
+                            <Link
+                                href="/app"
+                                className="text-base font-black px-8 py-4 transition-all active:scale-95 hover:shadow-2xl"
+                                style={{
+                                    backgroundColor: "#0D1B4B",
+                                    color: "#C8960A",
+                                    borderColor: "#0D1B4B",
+                                    borderWidth: "4px",
+                                    boxShadow: "8px 8px 0px rgba(13,27,75,0.3)",
+                                }}
+                            >
+                                Start Earning →
+                            </Link>
+                            <Link
+                                href="#how"
+                                className="text-base font-black px-8 py-4 transition-all active:scale-95"
+                                style={{
+                                    backgroundColor: "transparent",
+                                    color: "#0D1B4B",
+                                    borderColor: "#0D1B4B",
+                                    borderWidth: "4px",
+                                    boxShadow: "8px 8px 0px rgba(13,27,75,0.15)",
+                                }}
+                            >
+                                How it works
+                            </Link>
+                        </div>
                     </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
 
-      {/* Recent Activity */}
-      <section className="space-y-4">
-        <h3 className="text-sm font-semibold text-zinc-400 px-1">Recent Activity</h3>
-        <div className="rounded-2xl bg-zinc-900/50 border border-zinc-800 overflow-hidden">
-          {dashboardError ? (
-            <div className="p-6 text-center text-red-400 text-sm">{dashboardError.message}</div>
-          ) : history.length === 0 ? (
-            <div className="p-8 text-center text-zinc-500 text-sm">No recent transactions</div>
-          ) : (
-            <div className="divide-y divide-zinc-800/50">
-              {history.slice(0, 5).map((item) => (
-                <div key={item.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/20 transition-colors">
-                  <div className="flex items-center">
-                    <div className={`p-2 rounded-full mr-3 ${item.type === 'received' || item.type === 'deposit' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
-                      {item.type === 'received' ? <ArrowDownIcon /> : item.type === 'sent' ? <ArrowUpIcon /> : <HistoryIcon />}
+                    {/* Right: mascot */}
+                    <div className="relative shrink-0 flex items-center justify-center">
+                        <div
+                            className="absolute inset-0 rounded-full"
+                            style={{
+                                background:
+                                    "radial-gradient(circle, rgba(253,250,244,0.3) 0%, transparent 70%)",
+                            }}
+                        />
+                        <Image
+                            src={mascotImg}
+                            alt="OtterPay mascot — a lightning-bolt otter making peace signs"
+                            width={340}
+                            height={420}
+                            priority
+                            className="relative z-10 drop-shadow-2xl"
+                            style={{
+                                filter: "drop-shadow(0 8px 24px rgba(13,27,75,0.25))",
+                            }}
+                        />
                     </div>
-                    <div>
-                      <p className="text-xs font-bold text-zinc-200 uppercase tracking-tighter">{item.type}</p>
-                      <p className="text-[10px] text-zinc-500 font-mono mt-0.5">{item.txHash.slice(0, 10)}...</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className={`text-sm font-bold ${item.type === 'received' || item.type === 'deposit' ? 'text-emerald-400' : 'text-white'}`}>
-                      {item.type === 'received' || item.type === 'deposit' ? '+' : '-'}{item.amount.toFormatted(true)}
+                </div>
+
+                {/* Decorative zigzag bottom border */}
+                <div
+                    className="absolute bottom-0 left-0 right-0 h-3"
+                    style={{
+                        background:
+                            "repeating-linear-gradient(90deg, #0D1B4B 0px, #0D1B4B 12px, transparent 12px, transparent 24px)",
+                    }}
+                />
+            </section>
+
+            {/* ── TICKER STRIP ── */}
+            <div
+                className="overflow-hidden py-3"
+                style={{
+                    backgroundColor: "#0D1B4B",
+                    borderBottom: "4px solid #0D1B4B",
+                }}
+            >
+                <div className="flex gap-12 animate-marquee whitespace-nowrap text-sm font-black uppercase tracking-widest px-8" style={{ color: "#C8960A" }}>
+                    {[
+                        "Zero Gas Fees",
+                        "Yield on Every Balance",
+                        "Private Transfers",
+                        "Starknet Native",
+                        "Social Login",
+                        "Auto-Yield",
+                        "Confidential Payments",
+                        "Zero Gas Fees",
+                        "Yield on Every Balance",
+                        "Private Transfers",
+                        "Starknet Native",
+                        "Social Login",
+                        "Auto-Yield",
+                        "Confidential Payments",
+                    ].map((item, i) => (
+                        <span key={i} className="flex items-center gap-3">
+                            <span
+                                className="inline-block w-2 h-2 rounded-full"
+                                style={{ backgroundColor: "#1B7A4E" }}
+                            />
+                            {item}
+                        </span>
+                    ))}
+                </div>
+            </div>
+
+            {/* ── HOW IT WORKS ── */}
+            <section
+                id="how"
+                className="max-w-6xl mx-auto px-6 md:px-12 py-20 space-y-12"
+            >
+                <div className="text-center space-y-3">
+                    <p
+                        className="text-xs font-black uppercase tracking-widest"
+                        style={{ color: "#C8960A" }}
+                    >
+                        Simple as 1-2-3
                     </p>
-                    {item.timestamp && (
-                       <p className="text-[10px] text-zinc-500 mt-0.5">
-                         {new Date(item.timestamp * 1000).toLocaleDateString()}
-                       </p>
-                    )}
-                  </div>
+                    <h2
+                        className="text-4xl md:text-5xl font-black"
+                        style={{ color: "#0D1B4B" }}
+                    >
+                        GET PAID.
+                        <br className="md:hidden" />
+                        {" "}PAY.{" "}
+                        <span style={{ color: "#1B7A4E" }}>EARN.</span>
+                    </h2>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
 
-      {/* Wallet Status */}
-      <footer className="mt-auto py-8">
-        {!wallet ? (
-          <div className="space-y-3">
-            <button 
-              className="w-full py-4 rounded-xl bg-white text-black font-bold text-sm shadow-xl shadow-white/10 active:scale-98 transition-all hover:bg-zinc-200 disabled:opacity-50"
-              disabled={!ready || isConnecting}
-              onClick={handlePrivyConnect}
-            >
-              {isConnecting ? 'Setting up wallet...' : 'Social Login (Privy)'}
-            </button>
-            <button 
-              className="w-full py-4 rounded-xl bg-indigo-500 text-white font-bold text-sm shadow-xl shadow-indigo-500/10 active:scale-98 transition-all hover:bg-indigo-400 disabled:opacity-50"
-              disabled={isConnecting}
-              onClick={handleCartridgeConnect}
-            >
-              {isConnecting ? 'Opening Controller...' : 'Connect with Cartridge'}
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center space-x-2 text-zinc-500 text-xs font-mono">
-            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Connected: {wallet.address.slice(0, 6)}...{wallet.address.slice(-4)}</span>
-          </div>
-        )}
-      </footer>
-
-      {/* Send Modal */}
-      {showSendModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl space-y-6">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-bold text-white">Send Assets</h2>
-              <button 
-                onClick={() => { setShowSendModal(false); setStatus({ type: 'idle' }); }}
-                className="p-1 text-zinc-500 hover:text-white"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-
-            {/* Token Selector */}
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Select Token</label>
-              <div className="grid grid-cols-2 gap-2">
-                {assets.map((asset) => (
-                  <button
-                    key={asset.token.address}
-                    onClick={() => setSelectedAssetAddress(asset.token.address)}
-                    className={`p-3 rounded-2xl border transition-all text-left ${selectedAsset?.token.address === asset.token.address ? 'bg-indigo-500/10 border-indigo-500' : 'bg-zinc-900/50 border-zinc-800 hover:border-zinc-700'}`}
-                  >
-                    <p className="text-xs font-bold text-white">{asset.token.symbol}</p>
-                    <p className="text-[10px] text-zinc-500">{asset.walletBalance.add(asset.lendingBalance).toFormatted(true)} available</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Recipient */}
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Recipient Address</label>
-              <input 
-                type="text" 
-                placeholder="0x..."
-                value={recipient}
-                onChange={(e) => setRecipient(e.target.value)}
-                className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white text-sm placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500 transition-all font-mono"
-              />
-            </div>
-
-            {/* Amount */}
-            <div className="space-y-2">
-              <div className="flex justify-between items-baseline">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Amount</label>
-                {selectedAsset && (
-                  <button 
-                    onClick={() => setAmount(selectedAsset.walletBalance.add(selectedAsset.lendingBalance).toFormatted())}
-                    className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300"
-                  >
-                    Max
-                  </button>
-                )}
-              </div>
-              <input 
-                type="number" 
-                placeholder="0.00"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white text-2xl font-bold placeholder:text-zinc-800 focus:outline-none focus:border-indigo-500 transition-all"
-              />
-            </div>
-
-            {/* Status Message */}
-            {status.type !== 'idle' && (
-              <div className={`p-4 rounded-xl text-xs font-medium ${status.type === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : status.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}>
-                {status.message}
-              </div>
-            )}
-
-            <button
-              onClick={handleSend}
-              disabled={isSending || !selectedAsset || !recipient || !amount}
-              className="w-full py-4 rounded-2xl bg-indigo-500 text-white font-bold text-sm hover:bg-indigo-400 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-indigo-500/20"
-            >
-              {status.type === 'loading' ? 'Broadcasting...' : 'Confirm Send'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Receive Modal */}
-      {showReceiveModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl space-y-8">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-bold text-white">Receive Assets</h2>
-              <button 
-                onClick={() => setShowReceiveModal(false)}
-                className="p-1 text-zinc-500 hover:text-white"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-
-            <div className="flex flex-col items-center space-y-6">
-              {/* QR Placeholder / Visual */}
-              <div className="w-48 h-48 rounded-3xl bg-white p-4 flex items-center justify-center">
-                 {/* In a real app, generate a QR here */}
-                 <div className="w-full h-full bg-zinc-100 rounded-xl flex items-center justify-center border-2 border-dashed border-zinc-300">
-                   <p className="text-[10px] text-zinc-400 font-bold uppercase text-center px-4">Starknet Sepolia QR</p>
-                 </div>
-              </div>
-
-              <div className="w-full space-y-2">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block text-center">Your Deposit Address</label>
-                <div 
-                  onClick={() => copyToClipboard(wallet?.address || '')}
-                  className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs font-mono break-all text-center cursor-pointer hover:bg-zinc-800 transition-all active:scale-98 group relative"
-                >
-                  {wallet?.address}
-                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <CopyIcon />
-                  </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-0 md:gap-0">
+                    {[
+                        {
+                            step: "01",
+                            title: "Connect in Seconds",
+                            body: "Sign in with your social account via Privy or connect your Cartridge Controller wallet. No seed phrases for casual users.",
+                            bg: "#0D1B4B",
+                            fg: "#FDFAF4",
+                            accent: "#C8960A",
+                        },
+                        {
+                            step: "02",
+                            title: "Receive & Earn",
+                            body: "Incoming funds automatically flow into Vesu yield protocol. Your balance earns APY the moment it lands — no action needed.",
+                            bg: "#C8960A",
+                            fg: "#0D1B4B",
+                            accent: "#0D1B4B",
+                        },
+                        {
+                            step: "03",
+                            title: "Send for Free",
+                            body: "Every transfer is fully gasless — sponsored by AVNU paymaster. Send to anyone on Starknet without touching ETH for gas.",
+                            bg: "#1B7A4E",
+                            fg: "#FDFAF4",
+                            accent: "#C8960A",
+                        },
+                    ].map((item, i) => (
+                        <div
+                            key={i}
+                            className="p-8 md:p-10 space-y-4"
+                            style={{
+                                backgroundColor: item.bg,
+                                color: item.fg,
+                                border: "4px solid #0D1B4B",
+                                marginLeft: i > 0 ? "-4px" : "0",
+                            }}
+                        >
+                            <span
+                                className="text-5xl font-black opacity-20 block"
+                                style={{ color: item.accent }}
+                            >
+                                {item.step}
+                            </span>
+                            <h3
+                                className="text-xl font-black"
+                                style={{ color: item.accent }}
+                            >
+                                {item.title}
+                            </h3>
+                            <p className="text-sm font-bold leading-relaxed opacity-80">
+                                {item.body}
+                            </p>
+                        </div>
+                    ))}
                 </div>
-              </div>
-            </div>
+            </section>
 
-            <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20">
-              <p className="text-[10px] text-indigo-400 text-center font-medium leading-relaxed">
-                Funds received at this address stay liquid until you explicitly supply them to Vesu or move them into your private Tongo vault.
-              </p>
-            </div>
-
-            <button
-                onClick={() => setShowReceiveModal(false)}
-                className="w-full py-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white font-bold text-sm hover:bg-zinc-800 transition-all"
-              >
-                Done
-              </button>
-          </div>
-        </div>
-      )}
-
-      {showSupplyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl space-y-6">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-bold text-white">Supply To Yield</h2>
-              <button
-                onClick={() => { setShowSupplyModal(false); setSupplyStatus({ type: 'idle' }); }}
-                className="p-1 text-zinc-500 hover:text-white"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Wallet Token</label>
-              <div className="grid grid-cols-2 gap-2">
-                {liquidAssets.map((asset) => (
-                  <button
-                    key={asset.token.address}
-                    onClick={() => setSelectedSupplyAssetAddress(asset.token.address)}
-                    className={`p-3 rounded-2xl border transition-all text-left ${selectedSupplyAsset?.token.address === asset.token.address ? 'bg-indigo-500/10 border-indigo-500' : 'bg-zinc-900/50 border-zinc-800 hover:border-zinc-700'}`}
-                  >
-                    <p className="text-xs font-bold text-white">{asset.token.symbol}</p>
-                    <p className="text-[10px] text-zinc-500">{asset.walletBalance.toFormatted(true)} in wallet</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {selectedSupplyAsset && (
-              <div className="rounded-2xl bg-zinc-900/60 border border-zinc-800 p-4 space-y-1">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Available To Supply</p>
-                <p className="text-lg font-semibold text-white">
-                  {selectedSupplyAsset.walletBalance.toFormatted(true)} {selectedSupplyAsset.token.symbol}
-                </p>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <div className="flex justify-between items-baseline">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Amount</label>
-                {selectedSupplyAsset && (
-                  <button
-                    onClick={() => setSupplyAmount(selectedSupplyAsset.walletBalance.toFormatted())}
-                    className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300"
-                  >
-                    Max
-                  </button>
-                )}
-              </div>
-              <input
-                type="number"
-                placeholder="0.00"
-                value={supplyAmount}
-                onChange={(e) => setSupplyAmount(e.target.value)}
-                className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white text-2xl font-bold placeholder:text-zinc-700 focus:outline-none focus:border-indigo-500 transition-all"
-              />
-              <p className="text-[11px] text-zinc-500">You approve and deposit this amount into Vesu explicitly.</p>
-            </div>
-
-            {supplyStatus.type !== 'idle' && (
-              <div className={`p-4 rounded-xl text-xs font-medium ${supplyStatus.type === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : supplyStatus.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}>
-                {supplyStatus.message}
-              </div>
-            )}
-
-            <button
-              onClick={handleSupply}
-              disabled={isLendingAction || !selectedSupplyAsset || !supplyAmount}
-              className="w-full py-4 rounded-2xl bg-indigo-500 text-white font-bold text-sm hover:bg-indigo-400 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-indigo-500/20"
+            {/* ── FEATURES GRID ── */}
+            <section
+                className="py-20"
+                style={{
+                    backgroundColor: "#FDFAF4",
+                    borderTop: "4px solid #0D1B4B",
+                    borderBottom: "4px solid #0D1B4B",
+                }}
             >
-              {supplyStatus.type === 'loading' ? 'Submitting Supply...' : 'Confirm Supply'}
-            </button>
-          </div>
-        </div>
-      )}
+                <div className="max-w-6xl mx-auto px-6 md:px-12 space-y-12">
+                    <div className="text-center space-y-2">
+                        <p
+                            className="text-xs font-black uppercase tracking-widest"
+                            style={{ color: "#C8960A" }}
+                        >
+                            Everything you need
+                        </p>
+                        <h2
+                            className="text-4xl md:text-5xl font-black"
+                            style={{ color: "#0D1B4B" }}
+                        >
+                            BUILT DIFFERENT.
+                        </h2>
+                    </div>
 
-      {showWithdrawModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl space-y-6">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-bold text-white">Withdraw From Yield</h2>
-              <button
-                onClick={() => { setShowWithdrawModal(false); setWithdrawStatus({ type: 'idle' }); }}
-                className="p-1 text-zinc-500 hover:text-white"
-              >
-                <CloseIcon />
-              </button>
-            </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-0">
+                        {[
+                            {
+                                icon: <ZapIcon />,
+                                label: "Zero Gas, Every Time",
+                                desc: "OtterPay sponsors every transaction via AVNU paymaster. Your users never touch ETH for gas — ever.",
+                                bg: "#C8960A",
+                                fg: "#0D1B4B",
+                            },
+                            {
+                                icon: <TrendingUpIcon />,
+                                label: "Auto-Yield on Idle Funds",
+                                desc: "Every balance automatically earns yield through Vesu Finance. Turn on auto-mode and watch your money grow between payments.",
+                                bg: "#FDFAF4",
+                                fg: "#0D1B4B",
+                            },
+                            {
+                                icon: <LockIcon />,
+                                label: "Private Transfers",
+                                desc: "Tongo-powered confidential transfers shield your balance from public view. Your business, your privacy.",
+                                bg: "#0D1B4B",
+                                fg: "#FDFAF4",
+                            },
+                            {
+                                icon: <LayersIcon />,
+                                label: "Starknet Native",
+                                desc: "Built on Starknet's ZK-rollup for near-instant finality and negligible costs. The infrastructure your payments deserve.",
+                                bg: "#4A9EB5",
+                                fg: "#0D1B4B",
+                            },
+                        ].map((feat, i) => (
+                            <div
+                                key={i}
+                                className="p-10 space-y-4"
+                                style={{
+                                    backgroundColor: feat.bg,
+                                    color: feat.fg,
+                                    border: "4px solid #0D1B4B",
+                                    marginTop: i >= 2 ? "-4px" : "0",
+                                    marginLeft: i % 2 === 1 ? "-4px" : "0",
+                                }}
+                            >
+                                <div style={{ color: feat.fg, opacity: 0.9 }}>{feat.icon}</div>
+                                <h3 className="text-2xl font-black">
+                                    {feat.label}
+                                </h3>
+                                <p
+                                    className="text-sm font-bold leading-relaxed"
+                                    style={{ opacity: 0.75 }}
+                                >
+                                    {feat.desc}
+                                </p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </section>
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Yield Token</label>
-              <div className="grid grid-cols-2 gap-2">
-                {suppliedAssets.map((asset) => (
-                  <button
-                    key={asset.token.address}
-                    onClick={() => setSelectedYieldAssetAddress(asset.token.address)}
-                    className={`p-3 rounded-2xl border transition-all text-left ${selectedYieldAsset?.token.address === asset.token.address ? 'bg-emerald-500/10 border-emerald-500' : 'bg-zinc-900/50 border-zinc-800 hover:border-zinc-700'}`}
-                  >
-                    <p className="text-xs font-bold text-white">{asset.token.symbol}</p>
-                    <p className="text-[10px] text-zinc-500">{asset.lendingBalance.toFormatted(true)} in Vesu</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {selectedYieldAsset && (
-              <div className="rounded-2xl bg-zinc-900/60 border border-zinc-800 p-4 space-y-1">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Available To Withdraw</p>
-                <p className="text-lg font-semibold text-white">
-                  {selectedYieldAsset.lendingBalance.toFormatted(true)} {selectedYieldAsset.token.symbol}
-                </p>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <div className="flex justify-between items-baseline">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Amount</label>
-                {selectedYieldAsset && (
-                  <button
-                    onClick={() => setWithdrawAmount(selectedYieldAsset.lendingBalance.toFormatted())}
-                    className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300"
-                  >
-                    Max
-                  </button>
-                )}
-              </div>
-              <input
-                type="number"
-                placeholder="Leave blank to withdraw all"
-                value={withdrawAmount}
-                onChange={(e) => setWithdrawAmount(e.target.value)}
-                className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white text-2xl font-bold placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500 transition-all"
-              />
-              <p className="text-[11px] text-zinc-500">Leave the amount empty to withdraw the full Vesu position.</p>
-            </div>
-
-            {withdrawStatus.type !== 'idle' && (
-              <div className={`p-4 rounded-xl text-xs font-medium ${withdrawStatus.type === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : withdrawStatus.type === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
-                {withdrawStatus.message}
-              </div>
-            )}
-
-            <button
-              onClick={handleWithdraw}
-              disabled={isLendingAction || !selectedYieldAsset}
-              className="w-full py-4 rounded-2xl bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-emerald-500/20"
+            {/* ── YIELD SECTION ── */}
+            <section
+                className="py-20"
+                style={{
+                    backgroundColor: "#0D1B4B",
+                    borderBottom: "5px solid #0D1B4B",
+                }}
             >
-              {withdrawStatus.type === 'loading' ? 'Submitting Withdrawal...' : 'Confirm Withdraw'}
-            </button>
-          </div>
-        </div>
-      )}
+                <div className="max-w-6xl mx-auto px-6 md:px-12 flex flex-col md:flex-row items-center gap-12">
+                    <div className="flex-1 space-y-6">
+                        <p
+                            className="text-xs font-black uppercase tracking-widest"
+                            style={{ color: "#4A9EB5" }}
+                        >
+                            Powered by Vesu Finance
+                        </p>
+                        <h2
+                            className="text-4xl md:text-5xl font-black leading-tight"
+                            style={{ color: "#C8960A" }}
+                        >
+                            YOUR IDLE MONEY
+                            <br />
+                            <span style={{ color: "#FDFAF4" }}>NEVER SITS</span>
+                            <br />
+                            STILL.
+                        </h2>
+                        <p
+                            className="text-base font-bold leading-relaxed max-w-md"
+                            style={{ color: "#4A9EB5" }}
+                        >
+                            OtterPay auto-deposits your incoming funds into
+                            Vesu's lending protocol. You earn yield from the
+                            moment money arrives — and withdraw instantly
+                            when you need to send.
+                        </p>
+                        <div className="flex gap-3 flex-wrap">
+                            {["Auto-deposit", "Manual supply", "Instant withdraw", "Real APY"].map(
+                                (tag) => (
+                                    <span
+                                        key={tag}
+                                        className="px-4 py-2 text-xs font-black uppercase tracking-wider"
+                                        style={{
+                                            backgroundColor: "#1B7A4E",
+                                            color: "#FDFAF4",
+                                            borderColor: "#4A9EB5",
+                                            borderWidth: "2px",
+                                        }}
+                                    >
+                                        {tag}
+                                    </span>
+                                ),
+                            )}
+                        </div>
+                    </div>
 
-      {showConfidentialSetupModal && confidentialConfig && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl space-y-6">
-            <div className="flex justify-between items-center">
-              <div>
-                <h2 className="text-xl font-bold text-white">Private STRK Vault</h2>
-                <p className="text-sm text-zinc-500 mt-1">Set up your Sepolia Tongo key.</p>
-              </div>
-              <button
-                onClick={() => {
-                  setShowConfidentialSetupModal(false);
-                  setConfidentialStatus({ type: 'idle' });
-                }}
-                className="p-1 text-zinc-500 hover:text-white"
-              >
-                <CloseIcon />
-              </button>
-            </div>
+                    {/* Yield card mockup */}
+                    <div className="shrink-0 w-full md:w-80 space-y-3">
+                        <div
+                            className="p-6 space-y-4"
+                            style={{
+                                backgroundColor: "#FDFAF4",
+                                borderColor: "#C8960A",
+                                borderWidth: "4px",
+                                boxShadow: "10px 10px 0px rgba(200,150,10,0.3)",
+                            }}
+                        >
+                            <p
+                                className="text-xs font-black uppercase tracking-widest"
+                                style={{ color: "#0D1B4B" }}
+                            >
+                                Yield Performance
+                            </p>
+                            {[
+                                { symbol: "USDC", apy: "8.2%", color: "#1B7A4E" },
+                                { symbol: "STRK", apy: "12.4%", color: "#C8960A" },
+                                { symbol: "ETH", apy: "4.9%", color: "#4A9EB5" },
+                            ].map((token) => (
+                                <div
+                                    key={token.symbol}
+                                    className="flex items-center justify-between p-3"
+                                    style={{
+                                        backgroundColor: token.color + "18",
+                                        borderColor: token.color,
+                                        borderWidth: "2px",
+                                        borderLeft: `5px solid ${token.color}`,
+                                    }}
+                                >
+                                    <span
+                                        className="text-sm font-black"
+                                        style={{ color: "#0D1B4B" }}
+                                    >
+                                        {token.symbol}
+                                    </span>
+                                    <span
+                                        className="text-sm font-black"
+                                        style={{ color: token.color }}
+                                    >
+                                        {token.apy} APY
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                        <p
+                            className="text-[10px] font-bold text-center"
+                            style={{ color: "#4A9EB5" }}
+                        >
+                            * Indicative rates. Subject to Vesu market conditions.
+                        </p>
+                    </div>
+                </div>
+            </section>
 
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => {
-                  setConfidentialSetupMode('create');
-                  setConfidentialPrivateKeyInput(generateConfidentialPrivateKey());
-                  setConfidentialStatus({ type: 'idle' });
+            {/* ── PRIVACY SECTION ── */}
+            <section
+                className="py-20"
+                style={{
+                    backgroundColor: "#1B7A4E",
+                    borderBottom: "5px solid #0D1B4B",
                 }}
-                className={`rounded-2xl border px-4 py-3 text-left transition-all ${
-                  confidentialSetupMode === 'create'
-                    ? 'border-cyan-500 bg-cyan-500/10 text-cyan-200'
-                    : 'border-zinc-800 bg-zinc-900/50 text-zinc-400'
-                }`}
-              >
-                <p className="text-sm font-semibold">Create</p>
-                <p className="mt-1 text-[11px]">Generate a fresh Tongo key.</p>
-              </button>
-              <button
-                onClick={() => {
-                  setConfidentialSetupMode('import');
-                  setConfidentialPrivateKeyInput('');
-                  setConfidentialStatus({ type: 'idle' });
-                }}
-                className={`rounded-2xl border px-4 py-3 text-left transition-all ${
-                  confidentialSetupMode === 'import'
-                    ? 'border-cyan-500 bg-cyan-500/10 text-cyan-200'
-                    : 'border-zinc-800 bg-zinc-900/50 text-zinc-400'
-                }`}
-              >
-                <p className="text-sm font-semibold">Import</p>
-                <p className="mt-1 text-[11px]">Restore an existing Tongo key.</p>
-              </button>
-            </div>
+            >
+                <div className="max-w-6xl mx-auto px-6 md:px-12 flex flex-col md:flex-row items-center gap-12">
+                    {/* Visual */}
+                    <div
+                        className="shrink-0 w-full md:w-72 p-8 space-y-3"
+                        style={{
+                            backgroundColor: "#0D1B4B",
+                            borderColor: "#C8960A",
+                            borderWidth: "4px",
+                            boxShadow: "10px 10px 0px rgba(13,27,75,0.3)",
+                        }}
+                    >
+                        <p
+                            className="text-[10px] font-black uppercase tracking-widest"
+                            style={{ color: "#4A9EB5" }}
+                        >
+                            Private Vault
+                        </p>
+                        <div
+                            className="p-4 text-center space-y-2"
+                            style={{
+                                backgroundColor: "#1B7A4E1A",
+                                borderColor: "#1B7A4E",
+                                borderWidth: "2px",
+                            }}
+                        >
+                            <div style={{ color: "#C8960A" }}><ShieldIcon /></div>
+                            <p
+                                className="text-xs font-black"
+                                style={{ color: "#FDFAF4" }}
+                            >
+                                Active Balance
+                            </p>
+                            <p
+                                className="text-2xl font-black"
+                                style={{ color: "#C8960A" }}
+                            >
+                                ██████
+                            </p>
+                            <p
+                                className="text-[10px] font-bold"
+                                style={{ color: "#4A9EB5" }}
+                            >
+                                Shielded by Tongo
+                            </p>
+                        </div>
+                        {["Private Send", "Fund Vault", "Withdraw"].map((a) => (
+                            <div
+                                key={a}
+                                className="p-2 text-xs font-black text-center"
+                                style={{
+                                    backgroundColor: "#1B7A4E",
+                                    color: "#FDFAF4",
+                                    borderColor: "#1B7A4E",
+                                    borderWidth: "2px",
+                                }}
+                            >
+                                {a}
+                            </div>
+                        ))}
+                    </div>
 
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-                  Tongo Private Key
-                </label>
-                {confidentialSetupMode === 'create' && (
-                  <button
-                    onClick={() => setConfidentialPrivateKeyInput(generateConfidentialPrivateKey())}
-                    className="text-[10px] font-bold uppercase tracking-wider text-cyan-300 hover:text-cyan-200"
-                  >
-                    Regenerate
-                  </button>
-                )}
-              </div>
-              <textarea
-                value={confidentialPrivateKeyInput}
-                onChange={(e) => setConfidentialPrivateKeyInput(e.target.value)}
-                rows={4}
-                spellCheck={false}
-                className="w-full rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-xs font-mono text-white placeholder:text-zinc-700 focus:outline-none focus:border-cyan-500 resize-none"
-                placeholder="0x..."
-              />
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[11px] text-zinc-500">
-                  Store this key safely. It is separate from your wallet and required to restore private balances.
-                </p>
-                <button
-                  onClick={() => copyToClipboard(confidentialPrivateKeyInput)}
-                  disabled={!confidentialPrivateKeyInput}
-                  className="shrink-0 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-300 hover:border-zinc-700 hover:text-white disabled:opacity-50"
+                    <div className="flex-1 space-y-6">
+                        <p
+                            className="text-xs font-black uppercase tracking-widest"
+                            style={{ color: "#C8960A" }}
+                        >
+                            Powered by Tongo Protocol
+                        </p>
+                        <h2
+                            className="text-4xl md:text-5xl font-black leading-tight"
+                            style={{ color: "#FDFAF4" }}
+                        >
+                            PRIVATE WHEN
+                            <br />
+                            <span style={{ color: "#C8960A" }}>YOU NEED IT.</span>
+                        </h2>
+                        <p
+                            className="text-base font-bold leading-relaxed max-w-md"
+                            style={{ color: "#FDFAF4", opacity: 0.8 }}
+                        >
+                            OtterPay integrates Tongo's confidential transfer
+                            protocol. Shield your balances behind a private
+                            vault, send without revealing amounts, and
+                            withdraw back to your public wallet anytime.
+                        </p>
+                        <ul className="space-y-2">
+                            {[
+                                "Separate private key from your wallet",
+                                "Confidential balances on-chain",
+                                "Private send to Tongo addresses",
+                                "Emergency exit back to public wallet",
+                            ].map((item) => (
+                                <li
+                                    key={item}
+                                    className="flex items-center gap-3 text-sm font-bold"
+                                    style={{ color: "#FDFAF4" }}
+                                >
+                                    <span
+                                        className="shrink-0 w-5 h-5 flex items-center justify-center"
+                                        style={{
+                                            backgroundColor: "#C8960A",
+                                            color: "#0D1B4B",
+                                        }}
+                                    >
+                                        <CheckIcon />
+                                    </span>
+                                    {item}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            {/* ── ZERO FEES STATEMENT ── */}
+            <section
+                className="py-24 text-center"
+                style={{
+                    backgroundColor: "#4A9EB5",
+                    borderBottom: "5px solid #0D1B4B",
+                }}
+            >
+                <div className="max-w-4xl mx-auto px-6 space-y-6">
+                    <h2
+                        className="text-6xl md:text-8xl font-black leading-none tracking-tight"
+                        style={{
+                            color: "#0D1B4B",
+                            WebkitTextStroke: "1px #0D1B4B",
+                        }}
+                    >
+                        ZERO
+                        <br />
+                        <span
+                            style={{
+                                color: "#FDFAF4",
+                                WebkitTextStroke: "3px #0D1B4B",
+                            }}
+                        >
+                            GAS
+                        </span>
+                        <br />
+                        FEES.
+                    </h2>
+                    <p
+                        className="text-xl font-bold max-w-xl mx-auto"
+                        style={{ color: "#0D1B4B" }}
+                    >
+                        Every transaction on OtterPay is fully sponsored.
+                        No ETH. No STRK for gas. Just pay.
+                    </p>
+                    <div className="flex justify-center gap-4 flex-wrap pt-4">
+                        <div
+                            className="px-6 py-4 space-y-1 text-center"
+                            style={{
+                                backgroundColor: "#FDFAF4",
+                                borderColor: "#0D1B4B",
+                                borderWidth: "4px",
+                                boxShadow: "6px 6px 0px rgba(13,27,75,0.2)",
+                            }}
+                        >
+                            <p
+                                className="text-3xl font-black"
+                                style={{ color: "#0D1B4B" }}
+                            >
+                                $0.00
+                            </p>
+                            <p
+                                className="text-xs font-black uppercase tracking-wider"
+                                style={{ color: "#4A9EB5" }}
+                            >
+                                Gas per tx
+                            </p>
+                        </div>
+                        <div
+                            className="px-6 py-4 space-y-1 text-center"
+                            style={{
+                                backgroundColor: "#0D1B4B",
+                                borderColor: "#0D1B4B",
+                                borderWidth: "4px",
+                                boxShadow: "6px 6px 0px rgba(13,27,75,0.2)",
+                            }}
+                        >
+                            <p
+                                className="text-3xl font-black"
+                                style={{ color: "#C8960A" }}
+                            >
+                                ~0.5s
+                            </p>
+                            <p
+                                className="text-xs font-black uppercase tracking-wider"
+                                style={{ color: "#4A9EB5" }}
+                            >
+                                Finality
+                            </p>
+                        </div>
+                        <div
+                            className="px-6 py-4 space-y-1 text-center"
+                            style={{
+                                backgroundColor: "#1B7A4E",
+                                borderColor: "#0D1B4B",
+                                borderWidth: "4px",
+                                boxShadow: "6px 6px 0px rgba(13,27,75,0.2)",
+                            }}
+                        >
+                            <p
+                                className="text-3xl font-black"
+                                style={{ color: "#FDFAF4" }}
+                            >
+                                8%+
+                            </p>
+                            <p
+                                className="text-xs font-black uppercase tracking-wider"
+                                style={{ color: "#C8960A" }}
+                            >
+                                APY on idle
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* ── CTA ── */}
+            <section
+                className="py-24"
+                style={{
+                    backgroundColor: "#C8960A",
+                    borderBottom: "5px solid #0D1B4B",
+                }}
+            >
+                <div className="max-w-4xl mx-auto px-6 flex flex-col md:flex-row items-center gap-10">
+                    <div className="flex-1 space-y-5">
+                        <h2
+                            className="text-4xl md:text-6xl font-black leading-tight"
+                            style={{ color: "#0D1B4B" }}
+                        >
+                            READY TO LET
+                            <br />
+                            YOUR MONEY
+                            <br />
+                            <span style={{ color: "#FDFAF4", WebkitTextStroke: "2px #0D1B4B" }}>
+                                WORK?
+                            </span>
+                        </h2>
+                        <p
+                            className="text-base font-bold max-w-sm"
+                            style={{ color: "#0D1B4B" }}
+                        >
+                            No seed phrase required. Log in with your social
+                            account and start earning in under 60 seconds.
+                        </p>
+                        <Link
+                            href="/app"
+                            className="inline-block text-lg font-black px-10 py-5 transition-all active:scale-95 hover:shadow-2xl"
+                            style={{
+                                backgroundColor: "#0D1B4B",
+                                color: "#C8960A",
+                                borderColor: "#0D1B4B",
+                                borderWidth: "4px",
+                                boxShadow: "10px 10px 0px rgba(13,27,75,0.3)",
+                            }}
+                        >
+                            Launch OtterPay →
+                        </Link>
+                    </div>
+                    <div className="shrink-0">
+                        <Image
+                            src={mascotImg}
+                            alt="OtterPay mascot"
+                            width={220}
+                            height={270}
+                            className="drop-shadow-2xl"
+                            style={{
+                                filter: "drop-shadow(0 8px 20px rgba(13,27,75,0.3))",
+                            }}
+                        />
+                    </div>
+                </div>
+            </section>
+
+            {/* ── FOOTER ── */}
+            <footer
+                className="py-12 px-6 md:px-12"
+                style={{
+                    backgroundColor: "#0D1B4B",
+                    borderTop: "4px solid #0D1B4B",
+                }}
+            >
+                <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-start justify-between gap-8">
+                    <div className="space-y-2">
+                        <span
+                            className="text-2xl font-black"
+                            style={{ color: "#C8960A" }}
+                        >
+                            Otter<span style={{ color: "#FDFAF4" }}>Pay</span>
+                        </span>
+                        <p
+                            className="text-xs font-bold"
+                            style={{ color: "#4A9EB5" }}
+                        >
+                            Yield-bearing payments on Starknet
+                        </p>
+                    </div>
+
+                    <div className="flex gap-12">
+                        <div className="space-y-3">
+                            <p
+                                className="text-[10px] font-black uppercase tracking-widest"
+                                style={{ color: "#4A9EB5" }}
+                            >
+                                Product
+                            </p>
+                            {["Launch App", "How it Works", "Yield"].map(
+                                (item) => (
+                                    <p key={item}>
+                                        <Link
+                                            href="/app"
+                                            className="text-sm font-bold hover:opacity-70 transition-opacity"
+                                            style={{ color: "#FDFAF4" }}
+                                        >
+                                            {item}
+                                        </Link>
+                                    </p>
+                                ),
+                            )}
+                        </div>
+                        <div className="space-y-3">
+                            <p
+                                className="text-[10px] font-black uppercase tracking-widest"
+                                style={{ color: "#4A9EB5" }}
+                            >
+                                Built With
+                            </p>
+                            {["Starknet", "Vesu Finance", "Tongo", "AVNU"].map(
+                                (item) => (
+                                    <p key={item}>
+                                        <span
+                                            className="text-sm font-bold"
+                                            style={{ color: "#FDFAF4", opacity: 0.6 }}
+                                        >
+                                            {item}
+                                        </span>
+                                    </p>
+                                ),
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    className="max-w-6xl mx-auto mt-10 pt-6 flex flex-col md:flex-row items-center justify-between gap-3"
+                    style={{ borderTop: "2px solid rgba(74,158,181,0.15)" }}
                 >
-                  Copy
-                </button>
-              </div>
-            </div>
+                    <p
+                        className="text-xs font-bold"
+                        style={{ color: "#4A9EB5", opacity: 0.6 }}
+                    >
+                        © 2025 OtterPay. Built on Starknet Sepolia.
+                    </p>
+                    <p
+                        className="text-xs font-bold"
+                        style={{ color: "#4A9EB5", opacity: 0.6 }}
+                    >
+                        Testnet only — do not use real funds.
+                    </p>
+                </div>
+            </footer>
 
-            {confidentialStatus.type !== 'idle' && (
-              <div className={`p-4 rounded-xl text-xs font-medium ${
-                confidentialStatus.type === 'error'
-                  ? 'bg-red-500/10 text-red-300 border border-red-500/20'
-                  : confidentialStatus.type === 'success'
-                    ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
-                    : 'bg-cyan-500/10 text-cyan-200 border border-cyan-500/20'
-              }`}>
-                {confidentialStatus.message}
-              </div>
-            )}
-
-            <button
-              onClick={handleConfidentialSetup}
-              disabled={isConfidentialLoading || !confidentialPrivateKeyInput}
-              className="w-full py-4 rounded-2xl bg-cyan-500 text-black font-bold text-sm hover:bg-cyan-400 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-cyan-500/20"
-            >
-              {confidentialStatus.type === 'loading'
-                ? 'Preparing Vault...'
-                : confidentialSetupMode === 'create'
-                  ? 'Create Private Vault'
-                  : 'Import Private Vault'}
-            </button>
-          </div>
+            <style>{`
+                @keyframes marquee {
+                    0% { transform: translateX(0); }
+                    100% { transform: translateX(-50%); }
+                }
+                .animate-marquee {
+                    animation: marquee 30s linear infinite;
+                }
+            `}</style>
         </div>
-      )}
-
-      {showConfidentialFundModal && confidentialToken && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl space-y-6">
-            <div className="flex justify-between items-center">
-              <div>
-                <h2 className="text-xl font-bold text-white">Fund Private Vault</h2>
-                <p className="text-sm text-zinc-500 mt-1">Move public STRK into Tongo.</p>
-              </div>
-              <button
-                onClick={() => {
-                  setShowConfidentialFundModal(false);
-                  setConfidentialStatus({ type: 'idle' });
-                }}
-                className="p-1 text-zinc-500 hover:text-white"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 space-y-1">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Available Public Balance</p>
-              <p className="text-lg font-semibold text-white">
-                {assets.find((asset) => asset.token.address === confidentialToken.address)?.walletBalance.toFormatted(true) ?? '--'} {confidentialToken.symbol}
-              </p>
-              <p className="text-[11px] text-zinc-500">Approve is included automatically in the confidential fund flow.</p>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex justify-between items-baseline">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Amount</label>
-                <button
-                  onClick={() => {
-                    const asset = assets.find((entry) => entry.token.address === confidentialToken.address);
-                    setConfidentialFundAmount(asset?.walletBalance.toFormatted() ?? '');
-                  }}
-                  className="text-[10px] font-bold text-cyan-300 hover:text-cyan-200"
-                >
-                  Max
-                </button>
-              </div>
-              <input
-                type="number"
-                placeholder="0.00"
-                value={confidentialFundAmount}
-                onChange={(e) => setConfidentialFundAmount(e.target.value)}
-                className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white text-2xl font-bold placeholder:text-zinc-700 focus:outline-none focus:border-cyan-500 transition-all"
-              />
-            </div>
-
-            {confidentialStatus.type !== 'idle' && (
-              <div className={`p-4 rounded-xl text-xs font-medium ${
-                confidentialStatus.type === 'error'
-                  ? 'bg-red-500/10 text-red-300 border border-red-500/20'
-                  : confidentialStatus.type === 'success'
-                    ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
-                    : 'bg-cyan-500/10 text-cyan-200 border border-cyan-500/20'
-              }`}>
-                {confidentialStatus.message}
-              </div>
-            )}
-
-            <button
-              onClick={handleConfidentialFund}
-              disabled={isConfidentialLoading || !confidentialFundAmount}
-              className="w-full py-4 rounded-2xl bg-cyan-500 text-black font-bold text-sm hover:bg-cyan-400 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-cyan-500/20"
-            >
-              {confidentialStatus.type === 'loading' ? 'Funding...' : 'Confirm Private Funding'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {showConfidentialSendModal && confidentialToken && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl space-y-6">
-            <div className="flex justify-between items-center">
-              <div>
-                <h2 className="text-xl font-bold text-white">Private Send</h2>
-                <p className="text-sm text-zinc-500 mt-1">Send to a Tongo vault, not a wallet address.</p>
-              </div>
-              <button
-                onClick={() => {
-                  setShowConfidentialSendModal(false);
-                  setConfidentialStatus({ type: 'idle' });
-                }}
-                className="p-1 text-zinc-500 hover:text-white"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 space-y-1">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Active Private Balance</p>
-              <p className="text-lg font-semibold text-white">
-                {confidentialActiveBalance?.toFormatted(true) ?? '--'} {confidentialToken.symbol}
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Recipient</label>
-              <textarea
-                value={confidentialSendRecipient}
-                onChange={(e) => setConfidentialSendRecipient(e.target.value)}
-                rows={4}
-                spellCheck={false}
-                placeholder="Paste a Tongo address or { x, y } recipient JSON"
-                className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-xs font-mono text-white placeholder:text-zinc-700 focus:outline-none focus:border-cyan-500 resize-none"
-              />
-              <p className="text-[11px] text-zinc-500">
-                The docs require a confidential recipient public key. This form accepts a Tongo address or the raw recipient JSON.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex justify-between items-baseline">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Amount</label>
-                <button
-                  onClick={() => setConfidentialSendAmount(confidentialActiveBalance?.toFormatted() ?? '')}
-                  className="text-[10px] font-bold text-cyan-300 hover:text-cyan-200"
-                >
-                  Max
-                </button>
-              </div>
-              <input
-                type="number"
-                placeholder="0.00"
-                value={confidentialSendAmount}
-                onChange={(e) => setConfidentialSendAmount(e.target.value)}
-                className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white text-2xl font-bold placeholder:text-zinc-700 focus:outline-none focus:border-cyan-500 transition-all"
-              />
-            </div>
-
-            {confidentialStatus.type !== 'idle' && (
-              <div className={`p-4 rounded-xl text-xs font-medium ${
-                confidentialStatus.type === 'error'
-                  ? 'bg-red-500/10 text-red-300 border border-red-500/20'
-                  : confidentialStatus.type === 'success'
-                    ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
-                    : 'bg-cyan-500/10 text-cyan-200 border border-cyan-500/20'
-              }`}>
-                {confidentialStatus.message}
-              </div>
-            )}
-
-            <button
-              onClick={handleConfidentialTransfer}
-              disabled={isConfidentialLoading || !confidentialSendAmount || !confidentialSendRecipient}
-              className="w-full py-4 rounded-2xl bg-cyan-500 text-black font-bold text-sm hover:bg-cyan-400 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-cyan-500/20"
-            >
-              {confidentialStatus.type === 'loading' ? 'Sending Privately...' : 'Confirm Private Send'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {showConfidentialWithdrawModal && confidentialToken && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl space-y-6">
-            <div className="flex justify-between items-center">
-              <div>
-                <h2 className="text-xl font-bold text-white">Withdraw Private STRK</h2>
-                <p className="text-sm text-zinc-500 mt-1">Move private STRK back to a public address.</p>
-              </div>
-              <button
-                onClick={() => {
-                  setShowConfidentialWithdrawModal(false);
-                  setConfidentialStatus({ type: 'idle' });
-                }}
-                className="p-1 text-zinc-500 hover:text-white"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 space-y-1">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Active Private Balance</p>
-              <p className="text-lg font-semibold text-white">
-                {confidentialActiveBalance?.toFormatted(true) ?? '--'} {confidentialToken.symbol}
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Destination</label>
-              <input
-                type="text"
-                value={confidentialWithdrawRecipient}
-                onChange={(e) => setConfidentialWithdrawRecipient(e.target.value)}
-                placeholder="0x..."
-                className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white text-sm font-mono placeholder:text-zinc-700 focus:outline-none focus:border-cyan-500 transition-all"
-              />
-              <p className="text-[11px] text-zinc-500">Defaults to your connected wallet address.</p>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex justify-between items-baseline">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Amount</label>
-                <button
-                  onClick={() => setConfidentialWithdrawAmount(confidentialActiveBalance?.toFormatted() ?? '')}
-                  className="text-[10px] font-bold text-cyan-300 hover:text-cyan-200"
-                >
-                  Max
-                </button>
-              </div>
-              <input
-                type="number"
-                placeholder="0.00"
-                value={confidentialWithdrawAmount}
-                onChange={(e) => setConfidentialWithdrawAmount(e.target.value)}
-                className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white text-2xl font-bold placeholder:text-zinc-700 focus:outline-none focus:border-cyan-500 transition-all"
-              />
-            </div>
-
-            {confidentialStatus.type !== 'idle' && (
-              <div className={`p-4 rounded-xl text-xs font-medium ${
-                confidentialStatus.type === 'error'
-                  ? 'bg-red-500/10 text-red-300 border border-red-500/20'
-                  : confidentialStatus.type === 'success'
-                    ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
-                    : 'bg-cyan-500/10 text-cyan-200 border border-cyan-500/20'
-              }`}>
-                {confidentialStatus.message}
-              </div>
-            )}
-
-            <button
-              onClick={handleConfidentialWithdraw}
-              disabled={isConfidentialLoading || !confidentialWithdrawAmount}
-              className="w-full py-4 rounded-2xl bg-cyan-500 text-black font-bold text-sm hover:bg-cyan-400 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-cyan-500/20"
-            >
-              {confidentialStatus.type === 'loading' ? 'Withdrawing...' : 'Confirm Private Withdraw'}
-            </button>
-          </div>
-        </div>
-      )}
-    </main>
-  );
+    );
 }
 
-function formatConfidentialActivityType(type: string): string {
-  switch (type) {
-    case 'fund':
-      return 'Funded';
-    case 'withdraw':
-      return 'Withdrew';
-    case 'ragequit':
-      return 'Exited';
-    case 'rollover':
-      return 'Rolled Over';
-    case 'transferIn':
-      return 'Received';
-    case 'transferOut':
-      return 'Sent';
-    default:
-      return type;
-  }
-}
-
-function truncateMiddle(value: string, start: number, end: number): string {
-  if (value.length <= start + end + 3) return value;
-  return `${value.slice(0, start)}...${value.slice(-end)}`;
-}
-
-// Simple Icons
-function SendIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
-    </svg>
-  );
-}
-
-function ReceiveIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="17 7 7 17 7 7" /><polyline points="17 17 7 17 17 7" />
-    </svg>
-  );
+function ZapIcon() {
+    return (
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+        </svg>
+    );
 }
 
 function TrendingUpIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" />
-    </svg>
-  );
+    return (
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+            <polyline points="17 6 23 6 23 12" />
+        </svg>
+    );
 }
 
-function RefreshIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-    </svg>
-  );
+function LockIcon() {
+    return (
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
+    );
 }
 
-function ArrowDownIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="12" y1="5" x2="12" y2="19" /><polyline points="19 12 12 19 5 12" />
-    </svg>
-  );
+function LayersIcon() {
+    return (
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="12 2 2 7 12 12 22 7 12 2" />
+            <polyline points="2 17 12 22 22 17" />
+            <polyline points="2 12 12 17 22 12" />
+        </svg>
+    );
 }
 
-function ArrowUpIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" />
-    </svg>
-  );
+function ShieldIcon() {
+    return (
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
+    );
 }
 
-function HistoryIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-    </svg>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
-  );
-}
-
-function CopyIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-    </svg>
-  );
-}
-
-function VaultIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="4" y="11" width="16" height="9" rx="2" />
-      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-      <circle cx="12" cy="15" r="1.5" />
-    </svg>
-  );
-}
-
-function readStoredAutoYieldPreference(storageKey: string): boolean {
-  if (typeof window === 'undefined') return false;
-  return window.localStorage.getItem(storageKey) === 'true';
+function CheckIcon() {
+    return (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+        </svg>
+    );
 }
