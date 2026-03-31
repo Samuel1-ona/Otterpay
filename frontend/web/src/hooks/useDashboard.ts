@@ -5,16 +5,10 @@ import { useLending } from './useLending';
 import { useHistory } from './useHistory';
 import { Amount, Token, LendingUserPosition } from 'starkzap';
 import { CallData, num } from 'starknet';
-
-const VESU_POOL_FACTORY = {
-  SN_MAIN: '0x3760f903a37948f97302736f89ce30290e45f441559325026842b7a6fb388c0',
-  SN_SEPOLIA: '0x03ac869e64b1164aaee7f3fd251f86581eab8bfbbd2abdf1e49c773282d4a092',
-} as const;
-
-const VESU_DEFAULT_POOL = {
-  SN_MAIN: '0x0451fe483d5921a2919ddd81d0de6696669bccdacd859f72a4fba7656b97c3b5',
-  SN_SEPOLIA: '0x06227c13372b8c7b7f38ad1cfe05b5cf515b4e5c596dd05fe8437ab9747b2093',
-} as const;
+import {
+  getOtterpayNetworkConfig,
+  OtterpayChainLiteral,
+} from '../lib/otterpayNetworks';
 
 export interface DashboardAsset {
   token: Token;
@@ -29,17 +23,13 @@ export const useDashboard = () => {
   const { presets, balanceOf } = useTokens();
   const { getPositions } = useLending();
   
-  const tokenList = useMemo(() => presets ? Object.values(presets) : [], [presets]);
-  const coreTokenList = useMemo(() => 
-    tokenList.filter(t => ['ETH', 'USDC', 'STRK'].includes(t.symbol || '')),
-    [tokenList]
-  );
+  const tokenList = useMemo(() => (presets ? Object.values(presets) : []), [presets]);
   const {
     history,
     refresh: refreshHistory,
     loading: historyLoading,
     error: historyError,
-  } = useHistory(coreTokenList);
+  } = useHistory(tokenList);
 
   const [assets, setAssets] = useState<DashboardAsset[]>([]);
   const [totalBalanceUsd, setTotalBalanceUsd] = useState(0);
@@ -56,7 +46,7 @@ export const useDashboard = () => {
 
     try {
       const allPresets = Object.values(presets);
-      const chainLiteral = wallet.getChainId().toLiteral();
+      const chainLiteral = wallet.getChainId().toLiteral() as OtterpayChainLiteral;
       
       // 1. Fetch ALL positions first to know which tokens the user is interacting with
       const allPositions = await getPositions();
@@ -73,14 +63,9 @@ export const useDashboard = () => {
       });
 
       // 2. Identify tokens to fetch (Primary Tokens + Active Positions)
-      const coreSymbols = ['ETH', 'STRK', 'USDC'];
-      
-      const tokensToFetch = allPresets.filter(t => {
-        const addr = t.address.toLowerCase();
-        const isCore = coreSymbols.includes(t.symbol || '');
-        const hasPosition = positionMap.has(addr);
-        return isCore || hasPosition;
-      });
+      const coreSymbols = new Set(['ETH', 'STRK', 'USDC']);
+      const stableSymbols = new Set(['USDC', 'USDC.e', 'USDT', 'DAI']);
+      const tokensToFetch = allPresets;
 
       if (positionMap.size === 0) {
         for (const token of tokensToFetch) {
@@ -127,7 +112,9 @@ export const useDashboard = () => {
         const lBalance = pos ? Amount.fromRaw(pos.amount, token) : Amount.fromRaw(0n, token);
         let price = priceMap.get(token.address.toLowerCase()) || 0;
 
-        if (price === 0 && sdk && token.symbol !== 'USDC') {
+        if (stableSymbols.has(token.symbol || '')) price = 1;
+
+        if (price === 0 && sdk && token.symbol !== 'USDC' && presets.USDC) {
           try {
             const quote = await wallet.getQuote({
               tokenIn: token,
@@ -139,7 +126,6 @@ export const useDashboard = () => {
             console.warn(`[Dashboard] No price for ${token.symbol}`);
           }
         }
-        if (token.symbol === 'USDC') price = 1;
 
         const collateralUsdValue = pos
           ? pos.usdValue || (Number(lBalance.toBase()) / (10 ** (token.decimals || 18))) * price
@@ -151,7 +137,11 @@ export const useDashboard = () => {
         const tokenUsd = collateralUsdValue + (balanceNumeric * price);
 
         // Only add to results if balance is non-zero OR it's a core token
-        if (tokenUsd > 0 || Number(wBalance.toBase()) > 0 || coreSymbols.includes(token.symbol || '')) {
+        if (
+          tokenUsd > 0 ||
+          Number(wBalance.toBase()) > 0 ||
+          coreSymbols.has(token.symbol || '')
+        ) {
           results.push({
             token,
             walletBalance: wBalance,
@@ -194,11 +184,12 @@ export const useDashboard = () => {
 async function readVesuEarnBalance(
   wallet: NonNullable<ReturnType<typeof useStarkZap>['wallet']>,
   token: Token,
-  chainLiteral: 'SN_MAIN' | 'SN_SEPOLIA'
+  chainLiteral: OtterpayChainLiteral
 ): Promise<bigint> {
   const provider = wallet.getProvider();
-  const poolFactory = VESU_POOL_FACTORY[chainLiteral];
-  const defaultPool = VESU_DEFAULT_POOL[chainLiteral];
+  const networkConfig = getOtterpayNetworkConfig(chainLiteral);
+  const poolFactory = networkConfig.vesuPoolFactory;
+  const defaultPool = networkConfig.vesuDefaultPool;
 
   const vTokenResult = await provider.callContract({
     contractAddress: poolFactory,

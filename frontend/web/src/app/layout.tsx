@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import PrivyProvider from "@/providers/PrivyProvider";
+import { AppProviders } from "@/providers/AppProviders";
 
 const geistSans = Geist({
     variable: "--font-geist-sans",
@@ -19,9 +19,6 @@ export const metadata: Metadata = {
         "The most fun way to send and manage your crypto with built-in yield",
 };
 
-import { StarknetProvider } from "@/providers/StarknetProvider";
-import { StarkZapProvider } from "@/providers/StarkZapProvider";
-
 export default function RootLayout({
     children,
 }: Readonly<{
@@ -37,16 +34,7 @@ export default function RootLayout({
                 className="min-h-full flex flex-col"
                 style={{ backgroundColor: "#F5EFE4", color: "#0D1B4B" }}
             >
-                <StarknetProvider>
-                    <PrivyProvider>
-                        <StarkZapProvider
-                            network="sepolia"
-                            avnuApiKey={process.env.NEXT_PUBLIC_AVNU_API_KEY}
-                        >
-                            {children}
-                        </StarkZapProvider>
-                    </PrivyProvider>
-                </StarknetProvider>
+                <AppProviders>{children}</AppProviders>
             </body>
         </html>
     );

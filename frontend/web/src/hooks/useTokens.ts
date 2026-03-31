@@ -1,7 +1,19 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useStarkZap } from '../providers/StarkZapProvider';
-import { Amount, Token, Address, getPresets, getTokensFromAddresses, LendingPosition, fromAddress } from 'starkzap';
+import {
+  Amount,
+  Token,
+  Address,
+  getTokensFromAddresses,
+  LendingPosition,
+  fromAddress,
+} from 'starkzap';
 import { num } from 'starknet';
+import {
+  getAlternateLendingToken,
+  getOtterpayTokenPresets,
+  OtterpayChainLiteral,
+} from '../lib/otterpayNetworks';
 
 /**
  * Hook for core Token (ERC20) module operations (Web).
@@ -19,9 +31,12 @@ export const useTokens = () => {
   const presets = useMemo(() => {
     if (!wallet) return null;
     try {
-      const chainId = wallet.getChainId();
-      const p = getPresets(chainId);
-      console.log(`[useTokens] Presets loaded for chain ${chainId}:`, Object.keys(p || {}).length);
+      const chainLiteral = wallet.getChainId().toLiteral() as OtterpayChainLiteral;
+      const p = getOtterpayTokenPresets(chainLiteral);
+      console.log(
+        `[useTokens] Presets loaded for chain ${chainLiteral}:`,
+        Object.keys(p || {}).length,
+      );
       return p;
     } catch (err) {
       console.error('Failed to load token presets:', err);
@@ -76,26 +91,29 @@ export const useTokens = () => {
     setError(null);
     try {
       const targetAmount = Amount.parse(amount, token);
-      
-      // Get current wallet balance and lending position to check total liquidity
-      const ethAddress = '0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7';
-      const usdcAddress = '0x053c9125369e0151fbc37828196ed33c094b9d05b7f0300d3914966e53401777';
-      const debtToken = token.address === ethAddress
-        ? { address: usdcAddress, symbol: 'USDC', decimals: 6 } as Token
-        : { address: ethAddress, symbol: 'ETH', decimals: 18 } as Token;
+      const chainLiteral = wallet.getChainId().toLiteral() as OtterpayChainLiteral;
+      const debtToken = getAlternateLendingToken(chainLiteral, token.address);
 
       const walletBalance = await wallet.balanceOf(token);
       let position: Partial<LendingPosition> = { collateralAmount: 0n };
       
-      try {
-        position = await wallet.lending().getPosition({ 
-          collateralToken: token, 
-          debtToken: debtToken
-        });
-      } catch (e: unknown) {
-        // Suppress expected "asset-config-nonexistent" errors for non-Vesu pairs
-        if (!(e instanceof Error) || !e.message.includes('asset-config-nonexistent')) {
-          console.warn(`[useTokens] Lending position query failed for ${token.symbol}. Proceeding with wallet balance only.`, e);
+      if (debtToken) {
+        try {
+          position = await wallet.lending().getPosition({
+            collateralToken: token,
+            debtToken,
+          });
+        } catch (e: unknown) {
+          // Suppress expected "asset-config-nonexistent" errors for non-Vesu pairs.
+          if (
+            !(e instanceof Error) ||
+            !e.message.includes('asset-config-nonexistent')
+          ) {
+            console.warn(
+              `[useTokens] Lending position query failed for ${token.symbol}. Proceeding with wallet balance only.`,
+              e,
+            );
+          }
         }
       }
       
@@ -103,7 +121,9 @@ export const useTokens = () => {
       const totalLiquidity = Amount.fromRaw(totalLiquidityRaw, token);
 
       if (totalLiquidity.lt(targetAmount)) {
-        throw new Error(`Insufficient total balance (Wallet + Vesu). Needed: ${targetAmount.toFormatted()}, Found: ${totalLiquidity.toFormatted()}`);
+        throw new Error(
+          `Insufficient total balance (Wallet + Vesu). Needed: ${targetAmount.toFormatted()}, Found: ${totalLiquidity.toFormatted()}`,
+        );
       }
 
       // Normalize recipient address to ensure correct padding (fixes potential WASM unreachable error)

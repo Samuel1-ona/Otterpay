@@ -1,6 +1,10 @@
 import { useState, useCallback } from 'react';
 import { useStarkZap } from '../providers/StarkZapProvider';
 import { Amount, Token } from 'starkzap';
+import {
+  getAlternateLendingToken,
+  OtterpayChainLiteral,
+} from '../lib/otterpayNetworks';
 
 /**
  * Hook for core Lending (Vesu) module operations (Web).
@@ -77,15 +81,12 @@ export const useLending = () => {
     setLoading(true);
     setError(null);
     try {
-      // For Vesu earn positions, we query collateral and debt on the same token asset
-      // However, the contract reverts with "identical-assets" if addresses match.
-      // We fallback to a different token for the debt query to satisfy the check.
-      const ethAddress = '0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7';
-      const usdcAddress = '0x053c9125369e0151fbc37828196ed33c094b9d05b7f0300d3914966e53401777';
-      
-      const debtToken = token.address === ethAddress
-        ? { address: usdcAddress, symbol: 'USDC', decimals: 6 } as Token
-        : { address: ethAddress, symbol: 'ETH', decimals: 18 } as Token;
+      const chainLiteral = wallet.getChainId().toLiteral() as OtterpayChainLiteral;
+      const debtToken = getAlternateLendingToken(chainLiteral, token.address);
+
+      if (!debtToken) {
+        throw new Error(`No alternate lending token configured for ${token.symbol}`);
+      }
 
       const position = await wallet.lending().getPosition({ 
         collateralToken: token, 
@@ -109,12 +110,19 @@ export const useLending = () => {
     if (!wallet) throw new Error('Wallet not connected');
     try {
       const parsedAmount = Amount.parse(amount, token);
+      const chainLiteral = wallet.getChainId().toLiteral() as OtterpayChainLiteral;
+      const debtToken = getAlternateLendingToken(chainLiteral, token.address);
+
+      if (!debtToken) {
+        throw new Error(`No alternate lending token configured for ${token.symbol}`);
+      }
+
       return await wallet.lending().quoteHealth({
         action: {
           action,
           request: { token, amount: parsedAmount }
         },
-        health: { collateralToken: token, debtToken: token }
+        health: { collateralToken: token, debtToken }
       });
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Failed to quote health');

@@ -147,6 +147,8 @@ export default function LandingPage() {
                             priority
                             className="relative z-10 drop-shadow-2xl"
                             style={{
+                                width: "auto",
+                                height: "auto",
                                 filter: "drop-shadow(0 8px 24px rgba(13,27,75,0.25))",
                             }}
                         />
@@ -177,14 +179,14 @@ export default function LandingPage() {
                         "Yield on Every Balance",
                         "Private Transfers",
                         "Starknet Native",
-                        "Social Login",
+                        "Cartridge Wallet",
                         "Auto-Yield",
                         "Confidential Payments",
                         "Zero Gas Fees",
                         "Yield on Every Balance",
                         "Private Transfers",
                         "Starknet Native",
-                        "Social Login",
+                        "Cartridge Wallet",
                         "Auto-Yield",
                         "Confidential Payments",
                     ].map((item, i) => (
@@ -227,7 +229,7 @@ export default function LandingPage() {
                         {
                             step: "01",
                             title: "Connect in Seconds",
-                            body: "Sign in with your social account via Privy or connect your Cartridge Controller wallet. No seed phrases for casual users.",
+                            body: "Connect your Cartridge Controller wallet and start using a controller-first Starknet payment flow.",
                             bg: "#0D1B4B",
                             fg: "#FDFAF4",
                             accent: "#C8960A",
@@ -393,7 +395,7 @@ export default function LandingPage() {
                             style={{ color: "#4A9EB5" }}
                         >
                             OtterPay auto-deposits your incoming funds into
-                            Vesu's lending protocol. You earn yield from the
+                            Vesu&apos;s lending protocol. You earn yield from the
                             moment money arrives — and withdraw instantly
                             when you need to send.
                         </p>
@@ -562,7 +564,7 @@ export default function LandingPage() {
                             className="text-base font-bold leading-relaxed max-w-md"
                             style={{ color: "#FDFAF4", opacity: 0.8 }}
                         >
-                            OtterPay integrates Tongo's confidential transfer
+                            OtterPay integrates Tongo&apos;s confidential transfer
                             protocol. Shield your balances behind a private
                             vault, send without revealing amounts, and
                             withdraw back to your public wallet anytime.
@@ -754,6 +756,8 @@ export default function LandingPage() {
                             height={270}
                             className="drop-shadow-2xl"
                             style={{
+                                width: "auto",
+                                height: "auto",
                                 filter: "drop-shadow(0 8px 20px rgba(13,27,75,0.3))",
                             }}
                         />
@@ -838,13 +842,13 @@ export default function LandingPage() {
                         className="text-xs font-bold"
                         style={{ color: "#4A9EB5", opacity: 0.6 }}
                     >
-                        © 2025 OtterPay. Built on Starknet Sepolia.
+                        © 2025 OtterPay. Built on Starknet Mainnet + Sepolia.
                     </p>
                     <p
                         className="text-xs font-bold"
                         style={{ color: "#4A9EB5", opacity: 0.6 }}
                     >
-                        Testnet only — do not use real funds.
+                        Mainnet is live. Sepolia is testing-only and slated for deprecation.
                     </p>
                 </div>
             </footer>

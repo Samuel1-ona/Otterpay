@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useState, ReactNode } from
 import { StarkZap, WalletInterface, PrivySigner, SignerAdapter, ArgentXV050Preset, ChainId, Tx, fromAddress } from 'starkzap';
 import { CartridgeWallet } from 'starkzap/cartridge';
 import { hash, CallData } from 'starknet';
+import { getRpcUrlForNetwork, OtterpayNetwork } from '@/lib/otterpayNetworks';
 
 /**
  * Universal Provider Patch (UPP)
@@ -85,13 +86,13 @@ if (SignerAdapter && SignerAdapter.prototype) {
 
 import { useAccount, useConnect } from "@starknet-react/core";
 import { ControllerConnector } from "@cartridge/connector";
-import { cartridgeConnector } from './StarknetProvider';
 
 interface StarkZapContextType {
   sdk: StarkZap | null;
   wallet: WalletInterface | null;
   isLoading: boolean;
   error: Error | null;
+  network: OtterpayNetwork;
   connect: (accessToken: string, userId: string) => Promise<void>;
   connectWithCartridge: () => Promise<void>;
 }
@@ -108,7 +109,7 @@ export const useStarkZap = () => {
 
 interface StarkZapProviderProps {
   children: ReactNode;
-  network?: 'mainnet' | 'sepolia';
+  network?: OtterpayNetwork;
   avnuApiKey?: string;
 }
 
@@ -132,8 +133,17 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
         console.log('[StarkZapProvider] Syncing Cartridge Account to StarkZap SDK...');
         try {
           const cartConnector =
-            connectors.find(c => c.id === 'controller' || c instanceof ControllerConnector) ??
-            cartridgeConnector;
+            connectors.find(
+              (connector) =>
+                connector.id === 'controller' ||
+                connector instanceof ControllerConnector,
+            ) as ControllerConnector | undefined;
+
+          if (!cartConnector) {
+            console.error('[StarkZapProvider] Could not find Cartridge connector');
+            return;
+          }
+
           const controller = cartConnector.controller;
           
           if (!controller) {
@@ -201,9 +211,13 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
 
     const initSdk = async () => {
       try {
+        setSdk(null);
+        setWallet(null);
+        setError(null);
+
         const instance = new StarkZap({
           network,
-          rpcUrl: process.env.NEXT_PUBLIC_RPC_URL || process.env.NEXT_RPC,
+          rpcUrl: getRpcUrlForNetwork(network),
           paymaster: avnuApiKey ? {
             nodeUrl: AVNU_PAYMASTER_URLS[network],
             headers: { 
@@ -279,7 +293,11 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
     setError(null);
     try {
       // Use the starknet-react connect method with the Cartridge connector
-      const connector = connectors.find(c => c.id === 'controller' || c instanceof ControllerConnector) ?? cartridgeConnector;
+      const connector = connectors.find(
+        (candidate) =>
+          candidate.id === 'controller' || candidate instanceof ControllerConnector,
+      );
+
       if (!connector) throw new Error('Cartridge connector not found');
       
       await starknetConnect({ connector });
@@ -293,7 +311,9 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
   };
 
   return (
-    <StarkZapContext.Provider value={{ sdk, wallet, isLoading, error, connect, connectWithCartridge }}>
+    <StarkZapContext.Provider
+      value={{ sdk, wallet, isLoading, error, network, connect, connectWithCartridge }}
+    >
       {children}
     </StarkZapContext.Provider>
   );

@@ -1,7 +1,6 @@
 "use client";
 
 import React from "react";
-import { useStarkZap } from "@/providers/StarkZapProvider";
 import Link from "next/link";
 
 export default function SendPage() {

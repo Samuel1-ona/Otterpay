@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
+
 // Pure CommonJS shim to avoid ESM resolution and circularity issues
 const ethersV6 = require("../node_modules/ethers/lib.commonjs/index.js");
 const ethersV5 = require("ethers-v5");

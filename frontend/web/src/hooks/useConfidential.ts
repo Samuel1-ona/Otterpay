@@ -11,10 +11,12 @@ import {
 } from 'starkzap';
 import { AccountEvents, pubKeyBase58ToAffine } from '@fatsolutions/tongo-sdk';
 import { ec, num } from 'starknet';
+import {
+  getOtterpayConfidentialTokenDefinitions,
+  getOtterpayNetworkConfig,
+  OtterpayChainLiteral,
+} from '../lib/otterpayNetworks';
 
-const STRK_SEPOLIA_ADDRESS = '0x4718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d';
-const TONGO_STRK_CONTRACT_ADDRESS =
-  '0x408163bfcfc2d76f34b444cb55e09dace5905cf84c0884e4637c2c0f06ab6ed';
 const CONFIDENTIAL_HISTORY_LOOKBACK_BLOCKS = 150_000;
 
 export interface ConfidentialNetworkTokenConfig {
@@ -34,27 +36,30 @@ export interface ConfidentialActivityItem {
   counterparty?: string;
 }
 
-export const CONFIDENTIAL_TOKEN_CONFIG: Record<
-  'SN_SEPOLIA',
-  ConfidentialNetworkTokenConfig[]
-> = {
-  SN_SEPOLIA: [
-    {
-      tokenAddress: fromAddress(STRK_SEPOLIA_ADDRESS),
-      contractAddress: fromAddress(TONGO_STRK_CONTRACT_ADDRESS),
-      symbol: 'STRK',
-      label: 'Sepolia Private STRK',
-    },
-  ],
-};
+function getConfidentialTokenConfigs(
+  chainLiteral: OtterpayChainLiteral,
+): ConfidentialNetworkTokenConfig[] {
+  const networkConfig = getOtterpayNetworkConfig(chainLiteral);
+
+  return getOtterpayConfidentialTokenDefinitions(chainLiteral)
+    .filter((definition) => definition.tongoContractAddress != null)
+    .map((definition) => ({
+      tokenAddress: definition.token.address,
+      contractAddress: definition.tongoContractAddress as Address,
+      symbol: definition.token.symbol,
+      label: `${networkConfig.shortLabel} Private ${definition.token.symbol}`,
+    }));
+}
 
 export function getConfidentialTokenConfig(
   chainLiteral: 'SN_MAIN' | 'SN_SEPOLIA' | string,
   token: Token | null | undefined
 ): ConfidentialNetworkTokenConfig | null {
-  if (!token || chainLiteral !== 'SN_SEPOLIA') return null;
+  if (!token || (chainLiteral !== 'SN_MAIN' && chainLiteral !== 'SN_SEPOLIA')) {
+    return null;
+  }
 
-  const config = CONFIDENTIAL_TOKEN_CONFIG.SN_SEPOLIA.find(
+  const config = getConfidentialTokenConfigs(chainLiteral).find(
     (entry) => normalizeHex(entry.tokenAddress) === normalizeHex(token.address)
   );
 
@@ -118,7 +123,7 @@ export function parseConfidentialRecipientInput(input: string): ConfidentialReci
 
 /**
  * Hook for Tongo Confidential Payments (Web).
- * Provides vault state, history, and helpers for a Sepolia Tongo integration.
+ * Provides vault state, history, and helpers for network-aware Tongo integrations.
  */
 export const useConfidential = () => {
   const { wallet } = useStarkZap();

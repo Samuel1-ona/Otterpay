@@ -44,6 +44,7 @@ export const useAutoYield = ({
   const lastProcessedBlockRef = useRef<number | 'latest'>('latest');
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const isPollingRef = useRef(false);
+  const supportedLendingTokensRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!enabled || !wallet || supportedTokens.length === 0) {
@@ -56,10 +57,32 @@ export const useAutoYield = ({
       return;
     }
 
+    const resolveSupportedLendingTokens = async () => {
+      try {
+        const markets = await wallet.lending().getMarkets();
+        supportedLendingTokensRef.current = new Set(
+          markets.map((market) => market.asset.address.toLowerCase())
+        );
+      } catch (err) {
+        console.warn('[AutoYield] Failed to resolve lending markets. Falling back to the configured token list.', err);
+        supportedLendingTokensRef.current = new Set(
+          supportedTokens.map((token) => token.address.toLowerCase())
+        );
+      }
+    };
+
     const sweepIdleBalances = async (reason: 'startup' | 'incoming_transfer' | 'scheduled') => {
       let depositedAny = false;
 
+      if (supportedLendingTokensRef.current.size === 0) {
+        await resolveSupportedLendingTokens();
+      }
+
       for (const token of supportedTokens) {
+        if (!supportedLendingTokensRef.current.has(token.address.toLowerCase())) {
+          continue;
+        }
+
         const walletBalance = await wallet.balanceOf(token);
         const reserve = getGasReserve(token);
         const minDeposit = getMinimumDeposit(token);

@@ -1,4 +1,4 @@
-import { getPresets, StarknetWallet } from 'starkzap';
+import { getPresets } from 'starkzap';
 import { RpcProvider } from 'starknet';
 
 async function debugBalances() {

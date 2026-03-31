@@ -3,8 +3,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useStarkZap } from "@/providers/StarkZapProvider";
+import { useOtterpayNetwork } from "@/providers/OtterpayNetworkProvider";
 import { useDashboard } from "@/hooks/useDashboard";
-import { usePrivy } from "@privy-io/react-auth";
 import { useAutoYield } from "@/hooks/useAutoYield";
 import { useTokens } from "@/hooks/useTokens";
 import { useLending } from "@/hooks/useLending";
@@ -16,11 +16,19 @@ import {
     parseConfidentialRecipientInput,
     useConfidential,
 } from "@/hooks/useConfidential";
+import {
+    getOtterpayNetworkConfig,
+    OTTERPAY_NETWORK_ORDER,
+} from "@/lib/otterpayNetworks";
 
 export default function Dashboard() {
     const {
+        network,
+        setNetwork,
+        networkConfig: activeNetworkConfig,
+    } = useOtterpayNetwork();
+    const {
         wallet,
-        connect,
         connectWithCartridge,
         isLoading: isConnecting,
     } = useStarkZap();
@@ -34,8 +42,6 @@ export default function Dashboard() {
         refresh,
         supportedTokens,
     } = useDashboard();
-    const { login, logout, authenticated, user, getAccessToken, ready } =
-        usePrivy();
     const { send, loading: isSending } = useTokens();
     const {
         supply,
@@ -69,30 +75,16 @@ export default function Dashboard() {
         (asset) => !asset.walletBalance.isZero(),
     );
     const confidentialChainLiteral = wallet?.getChainId().toLiteral() ?? null;
-    const confidentialToken = useMemo(
+    const confidentialTokens = useMemo(
         () =>
-            supportedTokens.find((token) =>
+            supportedTokens.filter((token) =>
                 getConfidentialTokenConfig(
                     confidentialChainLiteral || "",
                     token,
                 ),
-            ) ?? null,
+            ),
         [supportedTokens, confidentialChainLiteral],
     );
-    const confidentialConfig = useMemo(
-        () =>
-            confidentialToken && confidentialChainLiteral
-                ? getConfidentialTokenConfig(
-                      confidentialChainLiteral,
-                      confidentialToken,
-                  )
-                : null,
-        [confidentialChainLiteral, confidentialToken],
-    );
-    const confidentialStorageKey = useMemo(() => {
-        if (!wallet || !confidentialConfig) return null;
-        return `starkpay:confidential:${wallet.address.toLowerCase()}:${confidentialConfig.contractAddress.toLowerCase()}`;
-    }, [wallet, confidentialConfig]);
     const autoYieldStorageKey = useMemo(() => {
         if (!wallet) return null;
         return `starkpay:auto-yield:${wallet.address.toLowerCase()}`;
@@ -124,6 +116,10 @@ export default function Dashboard() {
     const [selectedYieldAssetAddress, setSelectedYieldAssetAddress] = useState<
         string | null
     >(null);
+    const [
+        selectedConfidentialAssetAddress,
+        setSelectedConfidentialAssetAddress,
+    ] = useState<string | null>(null);
     const [recipient, setRecipient] = useState("");
     const [amount, setAmount] = useState("");
     const [status, setStatus] = useState<{
@@ -164,8 +160,29 @@ export default function Dashboard() {
         "home" | "yield" | "private" | "activity"
     >("home");
     const [copiedKey, setCopiedKey] = useState<string | null>(null);
-    const [mounted, setMounted] = useState(false);
-    useEffect(() => { setMounted(true); }, []);
+    const confidentialToken = useMemo(
+        () =>
+            confidentialTokens.find(
+                (token) => token.address === selectedConfidentialAssetAddress,
+            ) ??
+            confidentialTokens[0] ??
+            null,
+        [confidentialTokens, selectedConfidentialAssetAddress],
+    );
+    const confidentialConfig = useMemo(
+        () =>
+            confidentialToken && confidentialChainLiteral
+                ? getConfidentialTokenConfig(
+                      confidentialChainLiteral,
+                      confidentialToken,
+                  )
+                : null,
+        [confidentialChainLiteral, confidentialToken],
+    );
+    const confidentialStorageKey = useMemo(() => {
+        if (!wallet || !confidentialConfig) return null;
+        return `starkpay:confidential:${wallet.address.toLowerCase()}:${confidentialConfig.contractAddress.toLowerCase()}`;
+    }, [wallet, confidentialConfig]);
     const selectedAsset =
         assets.find((asset) => asset.token.address === selectedAssetAddress) ??
         assets[0] ??
@@ -285,45 +302,6 @@ export default function Dashboard() {
         return () => window.clearInterval(interval);
     }, [isConfidentialInitialized, confidentialToken, refreshConfidential]);
 
-    useEffect(() => {
-        const syncWallet = async () => {
-            if (ready && authenticated && user && !wallet && !isConnecting) {
-                try {
-                    const token = await getAccessToken();
-                    if (token && user) {
-                        await connect(token, user.id);
-                    }
-                } catch (err) {
-                    console.error(
-                        "Failed to sync Privy wallet with StarkZap:",
-                        err,
-                    );
-                }
-            }
-        };
-
-        syncWallet();
-    }, [
-        ready,
-        authenticated,
-        user,
-        wallet,
-        isConnecting,
-        connect,
-        getAccessToken,
-    ]);
-
-    const handlePrivyConnect = async () => {
-        if (!authenticated) {
-            login();
-        } else {
-            const token = await getAccessToken();
-            if (token && user) {
-                await connect(token, user.id);
-            }
-        }
-    };
-
     const handleCartridgeConnect = async () => {
         try {
             await connectWithCartridge();
@@ -340,6 +318,43 @@ export default function Dashboard() {
                 console.error("Failed to refresh confidential vault:", err);
             });
         }
+    };
+
+    const handleNetworkSwitch = (nextNetwork: typeof network) => {
+        if (nextNetwork === network) return;
+
+        clearConfidential();
+        setShowSendModal(false);
+        setShowReceiveModal(false);
+        setShowSupplyModal(false);
+        setShowWithdrawModal(false);
+        setShowConfidentialSetupModal(false);
+        setShowConfidentialFundModal(false);
+        setShowConfidentialSendModal(false);
+        setShowConfidentialWithdrawModal(false);
+        setStatus({ type: "idle" });
+        setSupplyStatus({ type: "idle" });
+        setWithdrawStatus({ type: "idle" });
+        setConfidentialStatus({ type: "idle" });
+        setAmount("");
+        setRecipient("");
+        setSupplyAmount("");
+        setWithdrawAmount("");
+        setConfidentialFundAmount("");
+        setConfidentialSendAmount("");
+        setConfidentialSendRecipient("");
+        setConfidentialWithdrawAmount("");
+        setConfidentialWithdrawRecipient("");
+        setSelectedConfidentialAssetAddress(null);
+        setNetwork(nextNetwork);
+    };
+
+    const handleSelectConfidentialToken = (tokenAddress: string) => {
+        if (tokenAddress === selectedConfidentialAssetAddress) return;
+
+        clearConfidential();
+        setConfidentialStatus({ type: "idle" });
+        setSelectedConfidentialAssetAddress(tokenAddress);
     };
 
     const openConfidentialSetup = (mode: "create" | "import") => {
@@ -762,60 +777,33 @@ export default function Dashboard() {
                         </div>
                     )}
                     {!wallet ? (
-                        <div className="space-y-2">
-                            <button
-                                className="w-full py-3 font-black text-xs transition-all active:scale-95"
-                                style={{
-                                    backgroundColor: "#C8960A",
-                                    color: "#0D1B4B",
-                                    borderColor: "#C8960A",
-                                    borderWidth: "3px",
-                                    boxShadow: "4px 4px 0px rgba(13,27,75,0.3)",
-                                }}
-                                disabled={!mounted || !ready || isConnecting}
-                                onClick={handlePrivyConnect}
-                            >
-                                {isConnecting ? "Connecting..." : "Social Login (Privy)"}
-                            </button>
-                            <button
-                                className="w-full py-3 font-black text-xs transition-all active:scale-95"
-                                style={{
-                                    backgroundColor: "transparent",
-                                    color: "#4A9EB5",
-                                    borderColor: "#4A9EB5",
-                                    borderWidth: "3px",
-                                    boxShadow: "4px 4px 0px rgba(13,27,75,0.3)",
-                                }}
-                                disabled={isConnecting}
-                                onClick={handleCartridgeConnect}
-                            >
-                                {isConnecting ? "Opening..." : "Connect Cartridge"}
-                            </button>
-                        </div>
+                        <button
+                            className="w-full py-3 font-black text-xs transition-all active:scale-95"
+                            style={{
+                                backgroundColor: "transparent",
+                                color: "#4A9EB5",
+                                borderColor: "#4A9EB5",
+                                borderWidth: "3px",
+                                boxShadow: "4px 4px 0px rgba(13,27,75,0.3)",
+                            }}
+                            disabled={isConnecting}
+                            onClick={handleCartridgeConnect}
+                        >
+                            {isConnecting ? "Opening..." : "Connect Cartridge"}
+                        </button>
                     ) : (
-                        <div className="space-y-2">
+                        <div
+                            className="flex items-center space-x-2 text-xs font-black"
+                            style={{ color: "#4A9EB5" }}
+                        >
                             <div
-                                className="flex items-center space-x-2 text-xs font-black"
-                                style={{ color: "#4A9EB5" }}
-                            >
-                                <div
-                                    className="h-2 w-2 rounded-full animate-pulse shrink-0"
-                                    style={{ backgroundColor: "#1B7A4E" }}
-                                />
-                                <span className="truncate font-mono">
-                                    {wallet.address.slice(0, 8)}...
-                                    {wallet.address.slice(-4)}
-                                </span>
-                            </div>
-                            {authenticated && (
-                                <button
-                                    onClick={logout}
-                                    className="text-[10px] font-bold uppercase tracking-tighter hover:opacity-70"
-                                    style={{ color: "#4A9EB5" }}
-                                >
-                                    Logout
-                                </button>
-                            )}
+                                className="h-2 w-2 rounded-full animate-pulse shrink-0"
+                                style={{ backgroundColor: "#1B7A4E" }}
+                            />
+                            <span className="truncate font-mono">
+                                {wallet.address.slice(0, 8)}...
+                                {wallet.address.slice(-4)}
+                            </span>
                         </div>
                     )}
                     <button
@@ -880,15 +868,6 @@ export default function Dashboard() {
                             </span>
                         </div>
                     )}
-                    {authenticated && (
-                        <button
-                            onClick={logout}
-                            className="text-[10px] font-bold transition-colors uppercase tracking-tighter"
-                            style={{ color: "#0D1B4B" }}
-                        >
-                            Logout
-                        </button>
-                    )}
                     <button
                         onClick={handleRefreshAll}
                         disabled={loading}
@@ -905,6 +884,121 @@ export default function Dashboard() {
                     </button>
                 </div>
             </header>
+
+            <section
+                className="p-5 space-y-4"
+                style={{
+                    backgroundColor: "#FDFAF4",
+                    borderColor: "#0D1B4B",
+                    borderWidth: "4px",
+                    boxShadow: "8px 8px 0px rgba(13, 27, 75, 0.2)",
+                }}
+            >
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-2">
+                        <p
+                            className="text-[10px] font-black uppercase tracking-[0.3em]"
+                            style={{ color: "#0D1B4B" }}
+                        >
+                            Network
+                        </p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <h2
+                                className="text-2xl font-black"
+                                style={{ color: "#0D1B4B" }}
+                            >
+                                {activeNetworkConfig.label}
+                            </h2>
+                            <span
+                                className="px-2 py-1 text-[10px] font-black uppercase tracking-wider"
+                                style={{
+                                    backgroundColor: activeNetworkConfig.deprecated
+                                        ? "#C8960A"
+                                        : "#1B7A4E",
+                                    color: "#0D1B4B",
+                                    borderColor: "#0D1B4B",
+                                    borderWidth: "2px",
+                                }}
+                            >
+                                {activeNetworkConfig.deprecated
+                                    ? "Testing Only"
+                                    : "Production"}
+                            </span>
+                        </div>
+                        <p
+                            className="text-sm font-bold max-w-xl"
+                            style={{ color: "#0D1B4B" }}
+                        >
+                            {activeNetworkConfig.tagline}
+                        </p>
+                        <p
+                            className="text-[11px] font-black uppercase tracking-wider"
+                            style={{ color: "#1B7A4E" }}
+                        >
+                            {activeNetworkConfig.tokens.length} ERC20 presets ·{" "}
+                            {
+                                activeNetworkConfig.tokens.filter(
+                                    (token) => token.tongoContractAddress != null,
+                                ).length
+                            }{" "}
+                            confidential vaults
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 md:min-w-[320px]">
+                        {OTTERPAY_NETWORK_ORDER.map((networkOption) => {
+                            const optionConfig =
+                                getOtterpayNetworkConfig(networkOption);
+                            const isSelected = networkOption === network;
+
+                            return (
+                                <button
+                                    key={networkOption}
+                                    type="button"
+                                    onClick={() =>
+                                        handleNetworkSwitch(networkOption)
+                                    }
+                                    className="p-3 text-left transition-all"
+                                    style={{
+                                        backgroundColor: isSelected
+                                            ? "#C8960A"
+                                            : "#4A9EB5",
+                                        color: "#0D1B4B",
+                                        borderColor: "#0D1B4B",
+                                        borderWidth: "3px",
+                                        boxShadow: isSelected
+                                            ? "4px 4px 0px rgba(13, 27, 75, 0.3)"
+                                            : "2px 2px 0px rgba(13, 27, 75, 0.2)",
+                                    }}
+                                >
+                                    <p className="text-sm font-black">
+                                        {optionConfig.shortLabel}
+                                    </p>
+                                    <p className="mt-1 text-[11px] font-bold leading-snug">
+                                        {optionConfig.deprecated
+                                            ? "Deprecated soon. Use only for testing."
+                                            : "Live balances, live payments."}
+                                    </p>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {activeNetworkConfig.warning && (
+                    <div
+                        className="p-4 text-xs font-black"
+                        style={{
+                            backgroundColor: "#C8960A",
+                            color: "#0D1B4B",
+                            borderColor: "#0D1B4B",
+                            borderWidth: "3px",
+                        }}
+                    >
+                        {activeNetworkConfig.warning}
+                    </div>
+                )}
+            </section>
 
             {/* Balance Card */}
             <section
@@ -1429,11 +1523,70 @@ export default function Dashboard() {
                                     borderWidth: "3px",
                                 }}
                             >
-                                Confidential transfers are currently configured
-                                for STRK on Starknet Sepolia.
+                                Connect a wallet on {activeNetworkConfig.label}{" "}
+                                to load the supported Tongo vault tokens for
+                                this network.
                             </div>
                         ) : !isConfidentialInitialized ? (
                             <div className="space-y-4">
+                                {confidentialTokens.length > 1 && (
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <p
+                                                className="text-[10px] font-black uppercase tracking-wider"
+                                                style={{ color: "#4A9EB5" }}
+                                            >
+                                                Private Asset
+                                            </p>
+                                            <p
+                                                className="text-[10px] font-black uppercase tracking-wider"
+                                                style={{ color: "#4A9EB5" }}
+                                            >
+                                                {confidentialTokens.length} supported
+                                            </p>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {confidentialTokens.map((token) => {
+                                                const isSelected =
+                                                    confidentialToken.address ===
+                                                    token.address;
+
+                                                return (
+                                                    <button
+                                                        key={token.address}
+                                                        type="button"
+                                                        onClick={() =>
+                                                            handleSelectConfidentialToken(
+                                                                token.address,
+                                                            )
+                                                        }
+                                                        className="p-3 text-left transition-all"
+                                                        style={{
+                                                            backgroundColor:
+                                                                isSelected
+                                                                    ? "#C8960A"
+                                                                    : "#4A9EB5",
+                                                            color: "#0D1B4B",
+                                                            borderColor: "#0D1B4B",
+                                                            borderWidth: "3px",
+                                                            boxShadow: isSelected
+                                                                ? "4px 4px 0px rgba(13, 27, 75, 0.3)"
+                                                                : "2px 2px 0px rgba(13, 27, 75, 0.2)",
+                                                        }}
+                                                    >
+                                                        <p className="text-xs font-black">
+                                                            {token.symbol}
+                                                        </p>
+                                                        <p className="mt-1 text-[10px] font-bold">
+                                                            Private vault
+                                                        </p>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="flex items-start justify-between gap-4">
                                     <div className="flex items-start gap-3">
                                         <div
@@ -1449,7 +1602,8 @@ export default function Dashboard() {
                                         </div>
                                         <div className="space-y-1">
                                             <p className="text-base font-black" style={{ color: "#C8960A" }}>
-                                                Create your private STRK vault
+                                                Create your private{" "}
+                                                {confidentialToken.symbol} vault
                                             </p>
                                             <p className="text-sm font-bold" style={{ color: "#4A9EB5" }}>
                                                 Shield balances with Tongo using
@@ -1532,6 +1686,64 @@ export default function Dashboard() {
                             </div>
                         ) : (
                             <div className="space-y-4">
+                                {confidentialTokens.length > 1 && (
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <p
+                                                className="text-[10px] font-black uppercase tracking-wider"
+                                                style={{ color: "#4A9EB5" }}
+                                            >
+                                                Private Asset
+                                            </p>
+                                            <p
+                                                className="text-[10px] font-black uppercase tracking-wider"
+                                                style={{ color: "#4A9EB5" }}
+                                            >
+                                                {confidentialTokens.length} supported
+                                            </p>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {confidentialTokens.map((token) => {
+                                                const isSelected =
+                                                    confidentialToken.address ===
+                                                    token.address;
+
+                                                return (
+                                                    <button
+                                                        key={token.address}
+                                                        type="button"
+                                                        onClick={() =>
+                                                            handleSelectConfidentialToken(
+                                                                token.address,
+                                                            )
+                                                        }
+                                                        className="p-3 text-left transition-all"
+                                                        style={{
+                                                            backgroundColor:
+                                                                isSelected
+                                                                    ? "#C8960A"
+                                                                    : "#4A9EB5",
+                                                            color: "#0D1B4B",
+                                                            borderColor: "#0D1B4B",
+                                                            borderWidth: "3px",
+                                                            boxShadow: isSelected
+                                                                ? "4px 4px 0px rgba(13, 27, 75, 0.3)"
+                                                                : "2px 2px 0px rgba(13, 27, 75, 0.2)",
+                                                        }}
+                                                    >
+                                                        <p className="text-xs font-black">
+                                                            {token.symbol}
+                                                        </p>
+                                                        <p className="mt-1 text-[10px] font-bold">
+                                                            Private vault
+                                                        </p>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="flex items-start gap-3">
                                         <div
@@ -2144,40 +2356,22 @@ export default function Dashboard() {
             {/* Wallet Status - Mobile Only */}
             <footer className="md:hidden mt-auto py-8">
                 {!wallet ? (
-                    <div className="space-y-3">
-                        <button
-                            className="w-full py-4 font-black text-sm shadow-xl transition-all hover:shadow-2xl active:scale-95"
-                            style={{
-                                backgroundColor: "#C8960A",
-                                color: "#0D1B4B",
-                                borderColor: "#0D1B4B",
-                                borderWidth: "4px",
-                                boxShadow: "8px 8px 0px rgba(13, 27, 75, 0.3)",
-                            }}
-                            disabled={!ready || isConnecting}
-                            onClick={handlePrivyConnect}
-                        >
-                            {isConnecting
-                                ? "Setting up wallet..."
-                                : "Social Login (Privy)"}
-                        </button>
-                        <button
-                            className="w-full py-4 font-black text-sm shadow-xl transition-all hover:shadow-2xl active:scale-95"
-                            style={{
-                                backgroundColor: "#0D1B4B",
-                                color: "#4A9EB5",
-                                borderColor: "#4A9EB5",
-                                borderWidth: "4px",
-                                boxShadow: "8px 8px 0px rgba(13, 27, 75, 0.3)",
-                            }}
-                            disabled={isConnecting}
-                            onClick={handleCartridgeConnect}
-                        >
-                            {isConnecting
-                                ? "Opening Controller..."
-                                : "Connect with Cartridge"}
-                        </button>
-                    </div>
+                    <button
+                        className="w-full py-4 font-black text-sm shadow-xl transition-all hover:shadow-2xl active:scale-95"
+                        style={{
+                            backgroundColor: "#0D1B4B",
+                            color: "#4A9EB5",
+                            borderColor: "#4A9EB5",
+                            borderWidth: "4px",
+                            boxShadow: "8px 8px 0px rgba(13, 27, 75, 0.3)",
+                        }}
+                        disabled={isConnecting}
+                        onClick={handleCartridgeConnect}
+                    >
+                        {isConnecting
+                            ? "Opening Controller..."
+                            : "Connect with Cartridge"}
+                    </button>
                 ) : (
                     <div
                         className="flex items-center justify-center space-x-2 text-xs font-black"
@@ -2438,7 +2632,7 @@ export default function Dashboard() {
                                         className="text-[10px] font-black uppercase text-center px-4"
                                         style={{ color: "#0D1B4B" }}
                                     >
-                                        Starknet Sepolia QR
+                                        {activeNetworkConfig.label} QR
                                     </p>
                                 </div>
                             </div>
@@ -2907,20 +3101,21 @@ export default function Dashboard() {
                             borderWidth: "5px",
                             boxShadow: "12px 12px 0px rgba(13, 27, 75, 0.3)",
                         }}
-                    >
-                        <div className="flex justify-between items-center">
+                        >
+                            <div className="flex justify-between items-center">
                             <div>
                                 <h2
                                     className="text-xl font-black"
                                     style={{ color: "#0D1B4B" }}
                                 >
-                                    Private STRK Vault
+                                    Private {confidentialToken.symbol} Vault
                                 </h2>
                                 <p
                                     className="text-sm mt-1"
                                     style={{ color: "#0D1B4B" }}
                                 >
-                                    Set up your Sepolia Tongo key.
+                                    Set up your {activeNetworkConfig.shortLabel}{" "}
+                                    Tongo key for {confidentialToken.symbol}.
                                 </p>
                             </div>
                             <button
