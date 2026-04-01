@@ -29,11 +29,18 @@ export function OtterpayNetworkProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const [network, setNetwork] = useState<OtterpayNetwork>(readStoredNetwork);
+  const [network, setNetwork] = useState<OtterpayNetwork>('mainnet');
+  const [hasLoadedStoredNetwork, setHasLoadedStoredNetwork] = useState(false);
 
   useEffect(() => {
+    setNetwork(readStoredNetwork());
+    setHasLoadedStoredNetwork(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedStoredNetwork) return;
     window.localStorage.setItem(NETWORK_STORAGE_KEY, network);
-  }, [network]);
+  }, [hasLoadedStoredNetwork, network]);
 
   const value = useMemo(
     () => ({

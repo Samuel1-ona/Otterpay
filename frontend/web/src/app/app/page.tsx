@@ -164,6 +164,8 @@ export default function Dashboard() {
     >("home");
     const [copiedKey, setCopiedKey] = useState<string | null>(null);
     const [showQrScanner, setShowQrScanner] = useState(false);
+    const [storedConfidentialKey, setStoredConfidentialKey] = useState<string | null>(null);
+    const [storedAutoYieldEnabled, setStoredAutoYieldEnabled] = useState(false);
     const confidentialToken = useMemo(
         () =>
             confidentialTokens.find(
@@ -203,18 +205,13 @@ export default function Dashboard() {
         ) ??
         suppliedAssets[0] ??
         null;
-    const storedConfidentialKey =
-        confidentialStorageKey && typeof window !== "undefined"
-            ? window.localStorage.getItem(confidentialStorageKey)
-            : null;
     const walletChainMatchesNetwork =
         !wallet ||
         wallet.getChainId().toLiteral() === activeNetworkConfig.chainId;
     const autoYieldEnabled =
         walletChainMatchesNetwork &&
         autoYieldStorageKey != null
-            ? (autoYieldOverrides[autoYieldStorageKey] ??
-              readStoredAutoYieldPreference(autoYieldStorageKey))
+            ? (autoYieldOverrides[autoYieldStorageKey] ?? storedAutoYieldEnabled)
             : false;
 
     const {
@@ -246,7 +243,7 @@ export default function Dashboard() {
     const yieldStatusDetail = lastDepositError
         ? `Last auto-supply failed: ${lastDepositError}`
         : lastConfirmedDeposit
-          ? `Confirmed: ${lastConfirmedDeposit.amountLabel} ${lastConfirmedDeposit.tokenSymbol} at ${new Date(lastConfirmedDeposit.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+          ? `Confirmed: ${lastConfirmedDeposit.amountLabel} ${lastConfirmedDeposit.tokenSymbol} at ${formatStableTime(lastConfirmedDeposit.at)}`
           : lastSubmittedDeposit
             ? `Pending confirmation: ${lastSubmittedDeposit.amountLabel} ${lastSubmittedDeposit.tokenSymbol}`
             : autoYieldEnabled
@@ -260,6 +257,20 @@ export default function Dashboard() {
             clearConfidential();
         }
     }, [wallet, clearConfidential]);
+
+    useEffect(() => {
+        setStoredConfidentialKey(
+            confidentialStorageKey
+                ? window.localStorage.getItem(confidentialStorageKey)
+                : null
+        );
+    }, [confidentialStorageKey]);
+
+    useEffect(() => {
+        if (autoYieldStorageKey) {
+            setStoredAutoYieldEnabled(readStoredAutoYieldPreference(autoYieldStorageKey));
+        }
+    }, [autoYieldStorageKey]);
 
     useEffect(() => {
         if (
@@ -714,7 +725,7 @@ export default function Dashboard() {
 
             {/* ── Desktop Sidebar ── */}
             <aside
-                className="hidden md:flex flex-col w-60 min-h-screen p-6 gap-6 sticky top-0 h-screen overflow-y-auto shrink-0"
+                className="hidden md:flex flex-col w-56 lg:w-64 min-h-screen p-5 lg:p-7 gap-5 lg:gap-6 sticky top-0 h-screen overflow-y-auto shrink-0"
                 style={{
                     backgroundColor: "#0D1B4B",
                     borderRight: "4px solid rgba(13,27,75,0.15)",
@@ -725,7 +736,7 @@ export default function Dashboard() {
                     <Link href="/" className="hover:opacity-80 transition-opacity">
                         <h1
                             className="text-3xl font-black tracking-tight"
-                            style={{ color: "#C8960A", fontFamily: "'Fredoka', sans-serif" }}
+                            style={{ color: "#C8960A", fontFamily: '"Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif' }}
                         >
                             OtterPay
                         </h1>
@@ -847,7 +858,7 @@ export default function Dashboard() {
 
             {/* ── Main Content ── */}
             <main
-                className="flex-1 flex flex-col p-5 md:p-8 w-full gap-5 max-w-2xl mx-auto"
+                className="flex-1 flex flex-col p-4 md:p-7 lg:p-10 w-full gap-4 md:gap-5 md:max-w-3xl lg:max-w-5xl mx-auto pb-28 md:pb-8"
                 style={{ backgroundColor: "#F5EFE4" }}
             >
             <button
@@ -855,7 +866,7 @@ export default function Dashboard() {
                 onClick={() => setShowNetworkModal(true)}
                 aria-haspopup="dialog"
                 aria-expanded={showNetworkModal}
-                className="fixed top-4 right-4 md:top-6 md:right-6 z-40 w-[7rem] p-2.5 text-left"
+                className="hidden md:block fixed md:top-6 md:right-6 z-40 w-[7rem] p-2.5 text-left"
                 style={{
                     backgroundColor: showNetworkModal ? "#C8960A" : "#0D1B4B",
                     color: showNetworkModal ? "#0D1B4B" : "#FDFAF4",
@@ -893,55 +904,76 @@ export default function Dashboard() {
             </button>
 
             {/* Header - Mobile Only */}
-            <header className="flex md:hidden justify-between items-center pr-36">
-                <Link href="/" className="hover:opacity-80 transition-opacity">
+            <header className="flex md:hidden items-center gap-2 pt-1">
+                <Link href="/" className="flex-1 min-w-0 hover:opacity-80 transition-opacity">
                     <h1
-                        className="text-4xl font-black tracking-tighter"
+                        className="text-2xl font-black tracking-tight leading-none"
                         style={{
                             color: "#0D1B4B",
-                            fontFamily: "'Fredoka', sans-serif",
+                            fontFamily: '"Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif',
                         }}
                     >
                         OtterPay
                     </h1>
                     <p
-                        className="text-sm font-bold"
-                        style={{ color: "#0D1B4B" }}
+                        className="text-xs font-bold mt-0.5"
+                        style={{ color: "#0D1B4B", opacity: 0.7 }}
                     >
                         Yield-bearing payments
                     </p>
                 </Link>
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center gap-2 shrink-0">
                     {isAutoYielding && (
                         <div
-                            className="flex items-center space-x-1.5 px-3 py-2 rounded border-4"
+                            className="flex items-center gap-1 px-2 py-1.5"
                             style={{
-                                backgroundColor: "#4A9EB51A",
+                                backgroundColor: "#1B7A4E1A",
                                 borderColor: "#1B7A4E",
+                                borderWidth: "2px",
                             }}
                         >
                             <div
-                                className="h-2 w-2 rounded-full animate-pulse"
+                                className="h-1.5 w-1.5 rounded-full animate-pulse shrink-0"
                                 style={{ backgroundColor: "#1B7A4E" }}
                             />
                             <span
-                                className="text-[10px] font-black uppercase tracking-tighter"
-                                style={{ color: "#0D1B4B" }}
+                                className="text-xs font-black uppercase"
+                                style={{ color: "#1B7A4E" }}
                             >
-                                Yielding...
+                                On
                             </span>
                         </div>
                     )}
                     <button
+                        type="button"
+                        onClick={() => setShowNetworkModal(true)}
+                        aria-haspopup="dialog"
+                        className="px-2.5 py-2 text-left shrink-0"
+                        style={{
+                            backgroundColor: "#0D1B4B",
+                            color: "#FDFAF4",
+                            borderColor: "#C8960A",
+                            borderWidth: "3px",
+                            boxShadow: "3px 3px 0px rgba(13,27,75,0.28)",
+                        }}
+                    >
+                        <span
+                            className="block text-xs font-black leading-none"
+                            style={{ color: "#C8960A" }}
+                        >
+                            {activeNetworkConfig.shortLabel}
+                        </span>
+                    </button>
+                    <button
                         onClick={handleRefreshAll}
                         disabled={loading}
-                        className={`p-2 rounded transition-all font-bold ${loading ? "animate-spin" : ""}`}
+                        className={`p-2 transition-all font-bold ${loading ? "animate-spin" : ""}`}
                         style={{
                             backgroundColor: "#C8960A",
                             borderColor: "#0D1B4B",
-                            borderWidth: "4px",
+                            borderWidth: "3px",
                             color: "#0D1B4B",
-                            boxShadow: "8px 8px 0px rgba(13, 27, 75, 0.3)",
+                            boxShadow: "4px 4px 0px rgba(13,27,75,0.3)",
                         }}
                     >
                         <RefreshIcon />
@@ -1142,9 +1174,9 @@ export default function Dashboard() {
                 </div>
             )}
 
-            {/* Balance Card */}
+            {/* Balance Card — always visible on desktop, home-only on mobile */}
             <section
-                className="relative overflow-hidden p-6 md:p-7 shadow-xl"
+                className={`relative overflow-hidden p-5 md:p-7 shadow-xl${activeTab !== "home" ? " hidden md:block" : ""}`}
                 style={{
                     backgroundColor: "#C8960A",
                     borderColor: "#0D1B4B",
@@ -1156,17 +1188,10 @@ export default function Dashboard() {
                     <div className="flex items-start justify-between gap-4">
                         <div>
                             <p
-                                className="text-sm font-black uppercase tracking-widest"
-                                style={{ color: "#0D1B4B" }}
+                                className="text-xs font-black uppercase tracking-widest"
+                                style={{ color: "#0D1B4B", opacity: 0.65 }}
                             >
                                 Total Balance
-                            </p>
-                            <p
-                                className="mt-1 text-sm font-bold"
-                                style={{ color: "#0D1B4B" }}
-                            >
-                                Tap the eye to hide wallet amounts on this
-                                screen.
                             </p>
                         </div>
                         <button
@@ -1197,15 +1222,15 @@ export default function Dashboard() {
                             )}
                         </button>
                     </div>
-                    <div className="mt-4 flex flex-wrap items-baseline gap-x-4 gap-y-2">
+                    <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
                         <span
-                            className="text-6xl font-black"
+                            className="text-6xl font-black leading-none"
                             style={{ color: "#0D1B4B" }}
                         >
                             {formatMaskedUsd(totalBalanceUsd, areBalancesVisible)}
                         </span>
                         <span
-                            className="text-lg font-black cursor-default"
+                            className="text-sm font-bold opacity-75"
                             style={{ color: "#0D1B4B" }}
                         >
                             {formatMaskedUsd(
@@ -1242,8 +1267,8 @@ export default function Dashboard() {
                 </div>
             </section>
 
-            {/* Quick Actions — 2-col mobile, 4-col desktop */}
-            <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {/* Quick Actions — home tab on mobile, always visible on desktop */}
+            <section className={`grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 ${activeTab !== "home" ? "hidden md:grid" : ""}`}>
                 <button
                     onClick={() => setShowSendModal(true)}
                     disabled={!wallet}
@@ -1257,7 +1282,7 @@ export default function Dashboard() {
                     }}
                 >
                     <SendIcon />
-                    <span className="text-base font-black uppercase tracking-wider">Send</span>
+                    <span className="text-sm font-black uppercase tracking-wide">Send</span>
                 </button>
                 <button
                     onClick={() => setShowReceiveModal(true)}
@@ -1272,7 +1297,7 @@ export default function Dashboard() {
                     }}
                 >
                     <ReceiveIcon />
-                    <span className="text-base font-black uppercase tracking-wider">Receive</span>
+                    <span className="text-sm font-black uppercase tracking-wide">Receive</span>
                 </button>
                 <button
                     onClick={() => {
@@ -1294,7 +1319,7 @@ export default function Dashboard() {
                     }}
                 >
                     <TrendingUpIcon />
-                    <span className="text-base font-black uppercase tracking-wider">
+                    <span className="text-sm font-black uppercase tracking-wide">
                         {!wallet ? "Supply" : liquidAssets.length === 0 ? "No Funds" : "Supply"}
                     </span>
                 </button>
@@ -1318,48 +1343,75 @@ export default function Dashboard() {
                     }}
                 >
                     <ArrowDownIcon />
-                    <span className="text-base font-black uppercase tracking-wider">
+                    <span className="text-sm font-black uppercase tracking-wide">
                         {!wallet ? "Withdraw" : suppliedAssets.length === 0 ? "No Yield" : "Withdraw"}
                     </span>
                 </button>
             </section>
 
-            {/* Tab Bar - Mobile Only */}
-            <div
-                className="md:hidden grid grid-cols-4"
+            {/* Bottom Nav - Mobile Only */}
+            <nav
+                className="mobile-bottom-nav md:hidden fixed bottom-0 left-0 right-0 z-40 grid grid-cols-4"
                 style={{
-                    borderColor: "#0D1B4B",
-                    borderWidth: "4px",
-                    boxShadow: "6px 6px 0px rgba(26,42,108,0.25)",
+                    backgroundColor: "#0D1B4B",
+                    borderTop: "4px solid #C8960A",
+                    boxShadow: "0 -8px 24px rgba(13,27,75,0.45)",
+                    paddingBottom: "env(safe-area-inset-bottom, 0px)",
                 }}
             >
                 {(
                     [
-                        { id: "home", label: "Home" },
-                        { id: "yield", label: "Yield" },
-                        { id: "private", label: "Private" },
-                        { id: "activity", label: "Activity" },
+                        { id: "home", label: "Home", icon: <HomeNavIcon /> },
+                        { id: "yield", label: "Yield", icon: <YieldNavIcon /> },
+                        { id: "private", label: "Private", icon: <LockNavIcon /> },
+                        { id: "activity", label: "Activity", icon: <ActivityNavIcon /> },
                     ] as const
-                ).map((tab, i) => (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id)}
-                        className="py-3.5 text-sm font-black uppercase tracking-wider transition-all"
-                        style={{
-                            backgroundColor:
-                                activeTab === tab.id ? "#0D1B4B" : "#FDFAF4",
-                            color:
-                                activeTab === tab.id ? "#C8960A" : "#0D1B4B",
-                            borderLeft:
-                                i > 0 ? "3px solid #0D1B4B" : undefined,
-                            borderWidth: undefined,
-                            boxShadow: "none",
-                        }}
-                    >
-                        {tab.label}
-                    </button>
-                ))}
-            </div>
+                ).map((tab, i) => {
+                    const isActive = activeTab === tab.id;
+                    return (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            className="relative flex flex-col items-center justify-center gap-1.5 py-3.5 transition-all active:scale-95"
+                            style={{
+                                color: isActive ? "#C8960A" : "rgba(253,250,244,0.45)",
+                                borderLeft: i > 0 ? "1px solid rgba(74,158,181,0.12)" : undefined,
+                            }}
+                        >
+                            {/* Active indicator bar */}
+                            {isActive && (
+                                <span
+                                    className="absolute top-0 left-3 right-3"
+                                    style={{
+                                        height: "3px",
+                                        backgroundColor: "#C8960A",
+                                        boxShadow: "0 0 8px rgba(200,150,10,0.6)",
+                                    }}
+                                />
+                            )}
+                            {/* Icon */}
+                            <span
+                                className="transition-transform"
+                                style={{
+                                    transform: isActive ? "translateY(-1px)" : "none",
+                                    filter: isActive
+                                        ? "drop-shadow(0 0 6px rgba(200,150,10,0.5))"
+                                        : "none",
+                                }}
+                            >
+                                {tab.icon}
+                            </span>
+                            {/* Label */}
+                            <span
+                                className="text-[10px] font-black uppercase tracking-wide leading-none"
+                                style={{ color: isActive ? "#C8960A" : "rgba(253,250,244,0.45)" }}
+                            >
+                                {tab.label}
+                            </span>
+                        </button>
+                    );
+                })}
+            </nav>
 
             {/* Yield Section */}
             {activeTab === "yield" && <section className="space-y-4">
@@ -1417,7 +1469,7 @@ export default function Dashboard() {
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div
                             className="p-4 font-bold text-black"
                             style={{
@@ -2518,9 +2570,7 @@ export default function Dashboard() {
                                                 className="text-xs mt-0.5 font-bold"
                                                 style={{ color: "#0D1B4B" }}
                                             >
-                                                {new Date(
-                                                    item.timestamp * 1000,
-                                                ).toLocaleDateString()}
+                                                {formatStableDate(item.timestamp * 1000)}
                                             </p>
                                         )}
                                     </div>
@@ -2532,7 +2582,7 @@ export default function Dashboard() {
             </section>}
 
             {/* Wallet Status - Mobile Only */}
-            <footer className="md:hidden mt-auto py-8">
+            <footer className="md:hidden mt-auto py-4">
                 {!wallet ? (
                     <button
                         className="w-full py-4 font-black text-sm shadow-xl transition-all hover:shadow-2xl active:scale-95"
@@ -4303,6 +4353,42 @@ function VaultIcon() {
     );
 }
 
+function HomeNavIcon() {
+    return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9.5z" />
+            <path d="M9 21V12h6v9" />
+        </svg>
+    );
+}
+
+function YieldNavIcon() {
+    return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+            <polyline points="16 7 22 7 22 13" />
+        </svg>
+    );
+}
+
+function LockNavIcon() {
+    return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            <circle cx="12" cy="16" r="1" fill="currentColor" />
+        </svg>
+    );
+}
+
+function ActivityNavIcon() {
+    return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+        </svg>
+    );
+}
+
 function ScanIcon() {
     return (
         <svg
@@ -4443,4 +4529,22 @@ function QrScannerModal({
 function readStoredAutoYieldPreference(storageKey: string): boolean {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(storageKey) === "true";
+}
+
+function formatStableTime(timestamp: number | string): string {
+    return new Intl.DateTimeFormat("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: "UTC",
+    }).format(new Date(timestamp));
+}
+
+function formatStableDate(timestamp: number): string {
+    return new Intl.DateTimeFormat("en-US", {
+        month: "short",
+        day: "2-digit",
+        year: "numeric",
+        timeZone: "UTC",
+    }).format(new Date(timestamp));
 }

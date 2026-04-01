@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { sepolia, mainnet } from "@starknet-react/chains";
 import { StarknetConfig, jsonRpcProvider, cartridge } from "@starknet-react/core";
 import { ControllerConnector } from "@cartridge/connector";
@@ -20,6 +20,11 @@ export function StarknetProvider({
   const networkConfig = getOtterpayNetworkConfig(network);
   const selectedChain = network === "mainnet" ? mainnet : sepolia;
   const chains = network === "mainnet" ? [mainnet, sepolia] : [sepolia, mainnet];
+  const [hasMounted, setHasMounted] = useState(false);
+
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
 
   const provider = useMemo(
     () =>
@@ -31,8 +36,7 @@ export function StarknetProvider({
 
   const cartridgeConnector = useMemo(
     () => {
-      const isBrowser = typeof window !== "undefined";
-      if (!isBrowser) return null;
+      if (!hasMounted) return null;
 
       return new ControllerConnector({
         defaultChainId: networkConfig.defaultChainId,
@@ -41,7 +45,7 @@ export function StarknetProvider({
         chains: [{ rpcUrl: networkConfig.rpcUrl }],
       });
     },
-    [network, networkConfig.defaultChainId, networkConfig.rpcUrl],
+    [hasMounted, network, networkConfig.defaultChainId, networkConfig.rpcUrl],
   );
 
   return (

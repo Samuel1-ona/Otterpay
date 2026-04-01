@@ -6,7 +6,7 @@ export default function LandingPage() {
     return (
         <div
             style={{
-                fontFamily: "'Fredoka', sans-serif",
+                fontFamily: '"Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif',
                 backgroundColor: "#F5EFE4",
                 color: "#0D1B4B",
             }}
