@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { StarkZap, WalletInterface, PrivySigner, SignerAdapter, ArgentXV050Preset, ChainId, Tx, fromAddress } from 'starkzap';
 import { CartridgeWallet } from 'starkzap/cartridge';
-import { hash, CallData } from 'starknet';
+import { hash, CallData, type Call } from 'starknet';
 import { getRpcUrlForNetwork, OtterpayNetwork } from '@/lib/otterpayNetworks';
 
 /**
@@ -31,27 +31,33 @@ type DeployAccountDetails = {
 
 type RawSignature = string[] | { r: string | bigint; s: string | bigint };
 
-type SignerAdapterWithRawSigner = SignerAdapter & {
+type SignerAdapterWithRawSigner = {
   signer: {
     signRaw: (messageHash: string) => Promise<RawSignature>;
   };
 };
 
-type StarkZapWithInternals = StarkZap & {
+type StarkZapInternals = {
   config: {
     staking?: unknown;
     bridging?: unknown;
   };
 };
 
-function patchProvider<T extends EventPatchable | null | undefined>(provider: T): T {
+type CartridgeWalletPatch = WalletInterface & {
+  explorerConfig?: unknown;
+  execute: (calls: Call[]) => Promise<Tx>;
+};
+
+function patchProvider<T extends object | null | undefined>(provider: T): T {
   if (!provider) return provider;
+  const patchable = provider as T & EventPatchable;
   const dummy = () => provider;
-  if (!provider.on) provider.on = dummy;
-  if (!provider.once) provider.once = dummy;
-  if (!provider.off) provider.off = dummy;
-  if (!provider.removeListener) provider.removeListener = dummy;
-  if (!provider.removeAllListeners) provider.removeAllListeners = dummy;
+  if (!patchable.on) patchable.on = dummy;
+  if (!patchable.once) patchable.once = dummy;
+  if (!patchable.off) patchable.off = dummy;
+  if (!patchable.removeListener) patchable.removeListener = dummy;
+  if (!patchable.removeAllListeners) patchable.removeAllListeners = dummy;
   return provider;
 }
 
@@ -62,12 +68,19 @@ if (PrivySigner && PrivySigner.prototype) {
 
 // Monkey-patch SignerAdapter to support V1 DEPLOY_ACCOUNT (required for sponsored deployments in current SDK)
 if (SignerAdapter && SignerAdapter.prototype) {
-  const originalSignDeploy = SignerAdapter.prototype.signDeployAccountTransaction;
-  SignerAdapter.prototype.signDeployAccountTransaction = async function (this: SignerAdapterWithRawSigner, details: DeployAccountDetails) {
+  const signerAdapterPrototype = SignerAdapter.prototype as unknown as {
+    signDeployAccountTransaction: (details: DeployAccountDetails) => Promise<string[]>;
+  };
+  const originalSignDeploy = signerAdapterPrototype.signDeployAccountTransaction;
+  signerAdapterPrototype.signDeployAccountTransaction = async function (
+    this: SignerAdapterWithRawSigner,
+    details: DeployAccountDetails
+  ) {
     if (BigInt(details.version) === 1n) {
-      const compiledConstructorCalldata = CallData.compile(details.constructorCalldata);
-      // @ts-expect-error starknet typings for this helper lag the runtime shape used by SignerAdapter.
-      const msgHash = hash.calculateDeployAccountTransactionHash({
+      const compiledConstructorCalldata = CallData.compile(details.constructorCalldata as never);
+      const msgHash = (hash as unknown as {
+        calculateDeployAccountTransactionHash: (payload: Record<string, unknown>) => string;
+      }).calculateDeployAccountTransactionHash({
         contractAddress: details.contractAddress,
         classHash: details.classHash,
         constructorCalldata: compiledConstructorCalldata,
@@ -80,7 +93,7 @@ if (SignerAdapter && SignerAdapter.prototype) {
       const txSig = await this.signer.signRaw(msgHash);
       return Array.isArray(txSig) ? txSig.map(String) : [String(txSig.r), String(txSig.s)];
     }
-    return originalSignDeploy.call(this, details);
+    return originalSignDeploy.call(this as never, details);
   };
 }
 
@@ -160,7 +173,7 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
 
           const provider = sdk.getProvider();
           const chainId = ChainId.fromFelt252(await controllerAccount.getChainId());
-          const sdkInternals = sdk as StarkZapWithInternals;
+          const sdkInternals = sdk as unknown as StarkZapInternals;
 
           let classHash = '0x0';
           try {
@@ -169,8 +182,18 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
             console.warn('[StarkZapProvider] Unable to resolve Cartridge account class hash. Continuing with fallback.', classHashError);
           }
 
-          // @ts-expect-error StarkZap's d.ts marks the constructor private, but the runtime export is instantiable.
-          const walletInstance = new CartridgeWallet(
+          const walletInstance = new (CartridgeWallet as unknown as {
+            new (
+              controller: unknown,
+              controllerAccount: unknown,
+              provider: unknown,
+              chainId: ChainId,
+              classHash: string,
+              staking?: unknown,
+              bridging?: unknown,
+              options?: { feeMode: 'user_pays' | 'sponsored' }
+            ): WalletInterface;
+          })(
             controller,
             controllerAccount,
             provider,
@@ -181,18 +204,15 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
             { feeMode: 'user_pays' }
           );
 
-          const controllerBackedWallet = walletInstance as CartridgeWallet & {
-            explorerConfig?: unknown;
-            execute: WalletInterface['execute'];
-          };
+          const controllerBackedWallet = walletInstance as unknown as CartridgeWalletPatch;
 
-          controllerBackedWallet.execute = async (calls) => {
+          controllerBackedWallet.execute = async (calls: Call[]) => {
             const txHash = (await controllerAccount.execute(calls)).transaction_hash;
             return new Tx(txHash, provider, chainId, controllerBackedWallet.explorerConfig as never);
           };
 
           console.log('[StarkZapProvider] Cartridge Synced:', walletInstance.address);
-          const patchedWallet = patchProvider(walletInstance);
+          const patchedWallet = patchProvider(walletInstance) as WalletInterface;
           setWallet(patchedWallet);
         } catch (err) {
           console.error('[StarkZapProvider] Failed to sync Cartridge account:', err);
@@ -272,7 +292,7 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
           feeMode: 'sponsored',
       });
       
-      const patchedWallet = patchProvider(walletInstance);
+      const patchedWallet = patchProvider(walletInstance) as WalletInterface;
       
       // Auto-deploy if needed (starkzap standard)
       await patchedWallet.ensureReady({ deploy: 'if_needed' });

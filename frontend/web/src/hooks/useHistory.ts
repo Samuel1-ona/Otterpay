@@ -101,14 +101,14 @@ export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryRe
         : latestBlock.block_number;
       const newItems: HistoryItem[] = [];
       const seenEvents = new Set<string>();
-      const queryPlans = [
+      const queryPlans: Array<{ keys: string[][] }> = [
         {
           keys: [[TRANSFER_EVENT_SELECTOR], [], [currentAddressKey]],
         },
         {
           keys: [[TRANSFER_EVENT_SELECTOR], [currentAddressKey]],
         },
-      ] as const;
+      ];
       let windowsScanned = 0;
 
       while (scanToBlock >= 0 && windowsScanned < MAX_WINDOWS_PER_FETCH) {
