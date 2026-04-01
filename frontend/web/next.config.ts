@@ -23,8 +23,8 @@ const nextConfig: NextConfig = {
     };
     return config;
   },
-  // @ts-expect-error Turbopack config typing lags the runtime support we use here.
   turbopack: {
+    root: path.resolve(__dirname),
     resolveAlias: {
       "ethers": "./src/ethers-shim.js",
       "ethers/lib/utils": "ethers-v5/lib/utils",
