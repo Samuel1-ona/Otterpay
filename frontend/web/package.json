@@ -22,9 +22,11 @@
     "@starknet-react/core": "^5.0.3",
     "ethers": "^6.16.0",
     "ethers-v5": "npm:ethers@^5.7.2",
+    "html5-qrcode": "^2.3.8",
     "next": "16.2.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "react-qr-code": "^2.0.18",
     "starknet": "^9.4.2",
     "starkzap": "^2.0.0"
   },

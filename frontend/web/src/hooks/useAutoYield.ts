@@ -102,7 +102,14 @@ export const useAutoYield = ({
           continue;
         }
 
-        const walletBalance = await wallet.balanceOf(token);
+        let walletBalance: Amount;
+        try {
+          walletBalance = await wallet.balanceOf(token);
+        } catch (err) {
+          // Contract not deployed on current network — skip silently
+          console.warn(`[AutoYield] Skipping ${token.symbol}: contract unreachable on current network.`);
+          continue;
+        }
         const reserve = getGasReserve(token);
         const minDeposit = getMinimumDeposit(token);
 

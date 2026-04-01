@@ -1,9 +1,26 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import Link from "next/link";
+import QRCode from "react-qr-code";
+import { useAccount } from "@starknet-react/core";
 
 export default function ReceivePage() {
+    const { address } = useAccount();
+    const [copied, setCopied] = useState(false);
+
+    const shortAddress = address
+        ? `${address.slice(0, 10)}...${address.slice(-8)}`
+        : "0x0000...0000";
+
+    function handleCopy() {
+        if (!address) return;
+        navigator.clipboard.writeText(address).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        });
+    }
+
     return (
         <main
             className="flex-1 flex flex-col p-6 max-w-lg mx-auto w-full space-y-8"
@@ -39,22 +56,31 @@ export default function ReceivePage() {
                     }}
                 >
                     <div
-                        className="w-64 h-64 flex items-center justify-center"
+                        className="w-64 h-64 flex items-center justify-center bg-white p-3"
                         style={{
-                            backgroundColor: "#FDFAF4",
                             borderColor: "#0D1B4B",
                             borderWidth: "4px",
                         }}
                     >
-                        <div
-                            className="text-center space-y-2 font-black"
-                            style={{ color: "#0D1B4B" }}
-                        >
-                            <QrCodeIcon />
-                            <p className="text-[10px] font-black uppercase tracking-widest">
-                                QR Code
-                            </p>
-                        </div>
+                        {address ? (
+                            <QRCode
+                                value={address}
+                                size={220}
+                                bgColor="#FFFFFF"
+                                fgColor="#0D1B4B"
+                                level="M"
+                            />
+                        ) : (
+                            <div
+                                className="text-center space-y-2 font-black"
+                                style={{ color: "#0D1B4B" }}
+                            >
+                                <QrCodeIcon />
+                                <p className="text-[10px] font-black uppercase tracking-widest">
+                                    Connect wallet
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -65,23 +91,30 @@ export default function ReceivePage() {
                     >
                         Your Wallet Address
                     </label>
-                    <div
-                        className="flex items-center space-x-2 group hover:opacity-80 transition-opacity cursor-pointer p-4 font-black"
+                    <button
+                        onClick={handleCopy}
+                        disabled={!address}
+                        className="w-full flex items-center space-x-2 group hover:opacity-80 transition-opacity cursor-pointer p-4 font-black disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{
                             backgroundColor: "#0D1B4B",
-                            color: "#4A9EB5",
+                            color: copied ? "#C8960A" : "#4A9EB5",
                             borderColor: "#0D1B4B",
                             borderWidth: "4px",
                             boxShadow: "6px 6px 0px rgba(26,42,108,0.3)",
                         }}
                     >
-                        <span className="flex-1 text-sm font-mono truncate">
-                            0x0000...0000
+                        <span className="flex-1 text-sm font-mono truncate text-left">
+                            {shortAddress}
                         </span>
-                        <div className="p-2">
-                            <CopyIcon />
+                        <div className="p-2 shrink-0">
+                            {copied ? <CheckIcon /> : <CopyIcon />}
                         </div>
-                    </div>
+                    </button>
+                    {copied && (
+                        <p className="text-xs font-black text-center uppercase tracking-wider" style={{ color: "#C8960A" }}>
+                            Copied!
+                        </p>
+                    )}
                 </div>
             </section>
 
@@ -130,6 +163,23 @@ function CopyIcon() {
         >
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+    );
+}
+
+function CheckIcon() {
+    return (
+        <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <polyline points="20 6 9 17 4 12" />
         </svg>
     );
 }

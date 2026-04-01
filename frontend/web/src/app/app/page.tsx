@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import QRCode from "react-qr-code";
 import { useStarkZap } from "@/providers/StarkZapProvider";
 import { useOtterpayNetwork } from "@/providers/OtterpayNetworkProvider";
 import { useDashboard } from "@/hooks/useDashboard";
@@ -162,6 +163,7 @@ export default function Dashboard() {
         "home" | "yield" | "private" | "activity"
     >("home");
     const [copiedKey, setCopiedKey] = useState<string | null>(null);
+    const [showQrScanner, setShowQrScanner] = useState(false);
     const confidentialToken = useMemo(
         () =>
             confidentialTokens.find(
@@ -205,7 +207,11 @@ export default function Dashboard() {
         confidentialStorageKey && typeof window !== "undefined"
             ? window.localStorage.getItem(confidentialStorageKey)
             : null;
+    const walletChainMatchesNetwork =
+        !wallet ||
+        wallet.getChainId().toLiteral() === activeNetworkConfig.chainId;
     const autoYieldEnabled =
+        walletChainMatchesNetwork &&
         autoYieldStorageKey != null
             ? (autoYieldOverrides[autoYieldStorageKey] ??
               readStoredAutoYieldPreference(autoYieldStorageKey))
@@ -2642,12 +2648,27 @@ export default function Dashboard() {
 
                         {/* Recipient */}
                         <div className="space-y-2">
-                            <label
-                                className="text-[10px] font-black uppercase tracking-wider"
-                                style={{ color: "#0D1B4B" }}
-                            >
-                                Recipient Address
-                            </label>
+                            <div className="flex items-center justify-between">
+                                <label
+                                    className="text-[10px] font-black uppercase tracking-wider"
+                                    style={{ color: "#0D1B4B" }}
+                                >
+                                    Recipient Address
+                                </label>
+                                <button
+                                    onClick={() => setShowQrScanner(true)}
+                                    className="flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider hover:opacity-70 transition-opacity"
+                                    style={{
+                                        backgroundColor: "#1B7A4E",
+                                        color: "#0D1B4B",
+                                        borderColor: "#0D1B4B",
+                                        borderWidth: "2px",
+                                    }}
+                                >
+                                    <ScanIcon />
+                                    Scan
+                                </button>
+                            </div>
                             <input
                                 type="text"
                                 placeholder="0x..."
@@ -2783,30 +2804,33 @@ export default function Dashboard() {
                         </div>
 
                         <div className="flex flex-col items-center space-y-6">
-                            {/* QR Placeholder / Visual */}
+                            {/* QR Code */}
                             <div
-                                className="w-48 h-48 p-4 flex items-center justify-center"
+                                className="p-3 flex items-center justify-center"
                                 style={{
-                                    backgroundColor: "#FDFAF4",
+                                    backgroundColor: "#FFFFFF",
                                     borderColor: "#0D1B4B",
                                     borderWidth: "4px",
                                 }}
                             >
-                                {/* In a real app, generate a QR here */}
-                                <div
-                                    className="w-full h-full flex items-center justify-center border-4 border-dashed"
-                                    style={{
-                                        borderColor: "#0D1B4B",
-                                        backgroundColor: "#1B7A4E",
-                                    }}
-                                >
-                                    <p
-                                        className="text-[10px] font-black uppercase text-center px-4"
-                                        style={{ color: "#0D1B4B" }}
+                                {wallet?.address ? (
+                                    <QRCode
+                                        value={wallet.address}
+                                        size={160}
+                                        bgColor="#FFFFFF"
+                                        fgColor="#0D1B4B"
+                                        level="M"
+                                    />
+                                ) : (
+                                    <div
+                                        className="w-40 h-40 flex items-center justify-center border-4 border-dashed"
+                                        style={{ borderColor: "#0D1B4B" }}
                                     >
-                                        {activeNetworkConfig.label} QR
-                                    </p>
-                                </div>
+                                        <p className="text-[10px] font-black uppercase text-center px-4" style={{ color: "#0D1B4B" }}>
+                                            No address
+                                        </p>
+                                    </div>
+                                )}
                             </div>
 
                             <div className="w-full space-y-2">
@@ -2873,6 +2897,17 @@ export default function Dashboard() {
                         </button>
                     </div>
                 </div>
+            )}
+
+            {/* QR Scanner Modal */}
+            {showQrScanner && (
+                <QrScannerModal
+                    onScan={(address) => {
+                        setRecipient(address);
+                        setShowQrScanner(false);
+                    }}
+                    onClose={() => setShowQrScanner(false)}
+                />
             )}
 
             {showSupplyModal && (
@@ -4265,6 +4300,143 @@ function VaultIcon() {
             <path d="M8 11V8a4 4 0 0 1 8 0v3" />
             <circle cx="12" cy="15" r="1.5" />
         </svg>
+    );
+}
+
+function ScanIcon() {
+    return (
+        <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+            <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+            <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+            <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+        </svg>
+    );
+}
+
+function QrScannerModal({
+    onScan,
+    onClose,
+}: {
+    onScan: (value: string) => void;
+    onClose: () => void;
+}) {
+    const scannerRef = useRef<InstanceType<typeof import("html5-qrcode").Html5Qrcode> | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [scanning, setScanning] = useState(false);
+    const containerId = "qr-scanner-container";
+
+    useEffect(() => {
+        let scanner: InstanceType<typeof import("html5-qrcode").Html5Qrcode> | null = null;
+
+        async function start() {
+            const { Html5Qrcode } = await import("html5-qrcode");
+            scanner = new Html5Qrcode(containerId);
+            scannerRef.current = scanner;
+            setScanning(true);
+            try {
+                await scanner.start(
+                    { facingMode: "environment" },
+                    { fps: 10, qrbox: { width: 220, height: 220 } },
+                    (decodedText) => {
+                        onScan(decodedText);
+                    },
+                    undefined,
+                );
+            } catch (err) {
+                setError("Camera access denied or not available.");
+                setScanning(false);
+            }
+        }
+
+        start();
+
+        return () => {
+            if (scanner) {
+                scanner.stop().catch(() => {});
+            }
+        };
+    }, [onScan]);
+
+    return (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm">
+            <div
+                className="w-full max-w-sm p-6 shadow-2xl space-y-4"
+                style={{
+                    backgroundColor: "#0D1B4B",
+                    borderColor: "#4A9EB5",
+                    borderWidth: "5px",
+                    boxShadow: "12px 12px 0px rgba(74,158,181,0.3)",
+                }}
+            >
+                <div className="flex justify-between items-center">
+                    <h2 className="text-xl font-black" style={{ color: "#4A9EB5" }}>
+                        Scan QR Code
+                    </h2>
+                    <button
+                        onClick={onClose}
+                        className="p-1 hover:opacity-70 font-bold"
+                        style={{ color: "#4A9EB5" }}
+                    >
+                        <CloseIcon />
+                    </button>
+                </div>
+
+                <p className="text-[10px] font-black uppercase tracking-wider text-center" style={{ color: "#4A9EB5" }}>
+                    Point camera at recipient&apos;s QR code
+                </p>
+
+                <div
+                    className="relative overflow-hidden"
+                    style={{
+                        borderColor: "#4A9EB5",
+                        borderWidth: "4px",
+                        backgroundColor: "#000",
+                    }}
+                >
+                    <div id={containerId} className="w-full" style={{ minHeight: 260 }} />
+                    {!scanning && !error && (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <p className="text-xs font-black uppercase" style={{ color: "#4A9EB5" }}>
+                                Starting camera...
+                            </p>
+                        </div>
+                    )}
+                </div>
+
+                {error && (
+                    <div
+                        className="p-3 text-xs font-black text-center"
+                        style={{ backgroundColor: "#FF664420", color: "#FF6644", borderColor: "#FF6644", borderWidth: "2px" }}
+                    >
+                        {error}
+                    </div>
+                )}
+
+                <button
+                    onClick={onClose}
+                    className="w-full py-3 font-black text-sm transition-all active:scale-95"
+                    style={{
+                        backgroundColor: "#4A9EB5",
+                        color: "#0D1B4B",
+                        borderColor: "#4A9EB5",
+                        borderWidth: "3px",
+                    }}
+                >
+                    Cancel
+                </button>
+            </div>
+        </div>
     );
 }
 
