@@ -21,6 +21,13 @@ import {
     getOtterpayNetworkConfig,
     OTTERPAY_NETWORK_ORDER,
 } from "@/lib/otterpayNetworks";
+import {
+    Skeleton,
+    SkeletonChip,
+    SkeletonAssetRow,
+    SkeletonTxRow,
+} from "@/components/Skeleton";
+import { TransactionToast } from "@/components/TransactionToast";
 
 export default function Dashboard() {
     const {
@@ -251,6 +258,21 @@ export default function Dashboard() {
               : "Keep this off for manual supply, or turn it on to sweep incoming funds into Vesu automatically.";
 
     const autoYieldModeLabel = autoYieldEnabled ? "ON" : "OFF";
+
+    // The first active transaction status to surface in the global toast
+    const activeToastStatus =
+        status.type !== "idle" ? status
+        : supplyStatus.type !== "idle" ? supplyStatus
+        : withdrawStatus.type !== "idle" ? withdrawStatus
+        : confidentialStatus.type !== "idle" ? confidentialStatus
+        : { type: "idle" as const };
+
+    const dismissToast = () => {
+        if (status.type !== "idle") setStatus({ type: "idle" });
+        else if (supplyStatus.type !== "idle") setSupplyStatus({ type: "idle" });
+        else if (withdrawStatus.type !== "idle") setWithdrawStatus({ type: "idle" });
+        else if (confidentialStatus.type !== "idle") setConfidentialStatus({ type: "idle" });
+    };
 
     useEffect(() => {
         if (!wallet) {
@@ -1222,47 +1244,60 @@ export default function Dashboard() {
                             )}
                         </button>
                     </div>
-                    <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-                        <span
-                            className="text-6xl font-black leading-none"
-                            style={{ color: "#0D1B4B" }}
-                        >
-                            {formatMaskedUsd(totalBalanceUsd, areBalancesVisible)}
-                        </span>
-                        <span
-                            className="text-sm font-bold opacity-75"
-                            style={{ color: "#0D1B4B" }}
-                        >
-                            {formatMaskedUsd(
-                                totalSuppliedUsd,
-                                areBalancesVisible,
-                            )}{" "}
-                            in Vesu
-                        </span>
+                    <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-2">
+                        {loading && totalBalanceUsd === 0 ? (
+                            <>
+                                <Skeleton className="h-12 w-44" />
+                                <Skeleton className="h-5 w-28" />
+                            </>
+                        ) : (
+                            <>
+                                <span
+                                    className="text-6xl font-black leading-none"
+                                    style={{ color: "#0D1B4B" }}
+                                >
+                                    {formatMaskedUsd(totalBalanceUsd, areBalancesVisible)}
+                                </span>
+                                <span
+                                    className="text-sm font-bold opacity-75"
+                                    style={{ color: "#0D1B4B" }}
+                                >
+                                    {formatMaskedUsd(totalSuppliedUsd, areBalancesVisible)}{" "}
+                                    in Vesu
+                                </span>
+                            </>
+                        )}
                     </div>
                     <div className="mt-5 flex flex-wrap gap-2.5">
-                        {assets.map((asset) => (
-                            <div
-                                key={asset.token.address}
-                                className="px-3 py-1.5 font-black text-xs"
-                                style={{
-                                    backgroundColor: "#1B7A4E",
-                                    borderColor: "#0D1B4B",
-                                    borderWidth: "3px",
-                                    color: "#FDFAF4",
-                                    boxShadow:
-                                        "4px 4px 0px rgba(13, 27, 75, 0.2)",
-                                }}
-                            >
-                                {asset.token.symbol}{" "}
-                                {formatMaskedText(
-                                    asset.walletBalance
-                                        .add(asset.lendingBalance)
-                                        .toFormatted(true),
-                                    areBalancesVisible,
-                                )}
-                            </div>
-                        ))}
+                        {loading && assets.length === 0 ? (
+                            <>
+                                <SkeletonChip width={80} />
+                                <SkeletonChip width={64} />
+                                <SkeletonChip width={72} />
+                            </>
+                        ) : (
+                            assets.map((asset) => (
+                                <div
+                                    key={asset.token.address}
+                                    className="px-3 py-1.5 font-black text-xs"
+                                    style={{
+                                        backgroundColor: "#1B7A4E",
+                                        borderColor: "#0D1B4B",
+                                        borderWidth: "3px",
+                                        color: "#FDFAF4",
+                                        boxShadow: "4px 4px 0px rgba(13, 27, 75, 0.2)",
+                                    }}
+                                >
+                                    {asset.token.symbol}{" "}
+                                    {formatMaskedText(
+                                        asset.walletBalance
+                                            .add(asset.lendingBalance)
+                                            .toFormatted(true),
+                                        areBalancesVisible,
+                                    )}
+                                </div>
+                            ))
+                        )}
                     </div>
                 </div>
             </section>
@@ -1413,6 +1448,9 @@ export default function Dashboard() {
                 })}
             </nav>
 
+            {/* Global transaction status toast */}
+            <TransactionToast status={activeToastStatus} onDismiss={dismissToast} />
+
             {/* Yield Section */}
             {activeTab === "yield" && <section className="space-y-4">
                 <h3
@@ -1485,12 +1523,16 @@ export default function Dashboard() {
                             >
                                 Wallet Cash
                             </p>
-                            <p
-                                className="mt-2 text-base font-black"
-                                style={{ color: "#0D1B4B" }}
-                            >
-                                $ {availableWalletUsd.toFixed(2)}
-                            </p>
+                            {loading && availableWalletUsd === 0 ? (
+                                <Skeleton className="mt-2 h-6 w-24" />
+                            ) : (
+                                <p
+                                    className="mt-2 text-base font-black"
+                                    style={{ color: "#0D1B4B" }}
+                                >
+                                    $ {availableWalletUsd.toFixed(2)}
+                                </p>
+                            )}
                             <p
                                 className="mt-1 text-xs"
                                 style={{ color: "#0D1B4B" }}
@@ -1610,7 +1652,12 @@ export default function Dashboard() {
                                 Withdrawable at any time
                             </p>
                         </div>
-                        {suppliedAssets.length === 0 ? (
+                        {loading && suppliedAssets.length === 0 ? (
+                            <div className="space-y-2">
+                                <SkeletonAssetRow />
+                                <SkeletonAssetRow />
+                            </div>
+                        ) : suppliedAssets.length === 0 ? (
                             <div
                                 className="p-3 border-3 text-[11px] font-bold"
                                 style={{
@@ -2498,6 +2545,13 @@ export default function Dashboard() {
                             style={{ color: "#0D1B4B" }}
                         >
                             {dashboardError.message}
+                        </div>
+                    ) : loading && history.length === 0 ? (
+                        <div>
+                            <SkeletonTxRow />
+                            <SkeletonTxRow />
+                            <SkeletonTxRow />
+                            <SkeletonTxRow />
                         </div>
                     ) : history.length === 0 ? (
                         <div
