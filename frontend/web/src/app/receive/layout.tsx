@@ -1,4 +1,5 @@
 import { AppProviders } from "@/providers/AppProviders";
+import React from "react";
 
 export default function ReceiveLayout({
     children,
