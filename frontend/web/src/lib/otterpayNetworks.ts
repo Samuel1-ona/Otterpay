@@ -52,13 +52,13 @@ function makeToken(
 const DEFAULT_SEPOLIA_RPC_URL =
   process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL ||
   process.env.NEXT_PUBLIC_RPC_URL ||
-  'https://starknet-sepolia.public.blastapi.io/rpc/v0_7';
+  'https://docs-demo.strk-sepolia.quiknode.pro/rpc/v0_7';
 
 const DEFAULT_MAINNET_RPC_URL =
   process.env.NEXT_PUBLIC_MAINNET_RPC_UR ||
   process.env.NEXT_PUBLIC_MAINNET_RPC_URL ||
   process.env.NEXT_PUBLIC_RPC_URL ||
-  'https://starknet-mainnet.public.blastapi.io/rpc/v0_7';
+  'https://rpc.starknet.lava.build';
 
 export const OTTERPAY_NETWORKS: Record<OtterpayNetwork, OtterpayNetworkConfig> = {
   mainnet: {

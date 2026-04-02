@@ -5,9 +5,12 @@ import { hash, num } from 'starknet';
 
 // ERC20 Transfer event selector
 const TRANSFER_EVENT_SELECTOR = hash.getSelectorFromName('Transfer');
-const HISTORY_BLOCK_WINDOW = 20_000;
-const MAX_WINDOWS_PER_FETCH = 8;
+const HISTORY_BLOCK_WINDOW = 25;
+const MAX_WINDOWS_PER_FETCH = 20;
+const INITIAL_MAX_WINDOWS_PER_FETCH = 80;
+const INITIAL_HISTORY_TARGET = 5;
 const EVENTS_CHUNK_SIZE = 100;
+const MAX_EVENT_PAGES_PER_TOKEN_PER_WINDOW = 12;
 
 export interface HistoryItem {
   id: string;
@@ -46,14 +49,6 @@ export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryRe
     () => tokens.map((token) => token.address.toLowerCase()).sort().join(','),
     [tokens]
   );
-  const tokenMap = useMemo(() => {
-    const map = new Map<string, Token>();
-    tokens.forEach((token) => {
-      map.set(num.toBigInt(token.address).toString(), token);
-    });
-    return map;
-  }, [tokens]);
-  
   // Pagination and State Tracking
   const oldestFetchedBlockRef = useRef<number | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -94,45 +89,42 @@ export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryRe
     try {
       const provider = wallet.getProvider();
       const currentAddress = normalizeAddress(wallet.address);
-      const currentAddressKey = num.toHex(wallet.address);
       const latestBlock = await provider.getBlock('latest');
+      const latestBlockNumber = latestBlock.block_number ?? 0;
       let scanToBlock = isNextPage && oldestFetchedBlockRef.current != null
         ? oldestFetchedBlockRef.current
-        : latestBlock.block_number;
+        : latestBlockNumber;
       const newItems: HistoryItem[] = [];
       const seenEvents = new Set<string>();
-      const queryPlans: Array<{ keys: string[][] }> = [
-        {
-          keys: [[TRANSFER_EVENT_SELECTOR], [], [currentAddressKey]],
-        },
-        {
-          keys: [[TRANSFER_EVENT_SELECTOR], [currentAddressKey]],
-        },
-      ];
+      const targetItemCount = isNextPage
+        ? pageSize
+        : Math.min(pageSize, INITIAL_HISTORY_TARGET);
+      const maxWindowsToScan = isNextPage
+        ? MAX_WINDOWS_PER_FETCH
+        : INITIAL_MAX_WINDOWS_PER_FETCH;
       let windowsScanned = 0;
 
-      while (scanToBlock >= 0 && windowsScanned < MAX_WINDOWS_PER_FETCH) {
+      while (scanToBlock >= 0 && windowsScanned < maxWindowsToScan) {
         const scanFromBlock = Math.max(0, scanToBlock - HISTORY_BLOCK_WINDOW + 1);
 
-        for (const plan of queryPlans) {
+        for (const token of tokens) {
           let continuationToken: string | undefined;
+          let eventPagesFetched = 0;
 
           do {
             const eventsResponse = await provider.getEvents({
-              keys: plan.keys,
+              address: token.address,
+              keys: [[TRANSFER_EVENT_SELECTOR]],
               from_block: { block_number: scanFromBlock },
               to_block: { block_number: scanToBlock },
               chunk_size: EVENTS_CHUNK_SIZE,
               continuation_token: continuationToken,
             });
 
-            eventsResponse.events.forEach((event, eventIndex) => {
-              const token = tokenMap.get(num.toBigInt(event.from_address).toString());
-              if (!token) return;
-
-              const dedupeKey = `${event.transaction_hash}:${event.block_number}:${event.from_address}:${event.keys?.join(',')}:${event.data?.join(',')}`;
-              if (seenEvents.has(dedupeKey)) return;
-              seenEvents.add(dedupeKey);
+            eventsResponse.events.forEach((event) => {
+              const eventIdentity = `${event.transaction_hash}:${event.block_number}:${event.from_address}:${event.keys?.join(',') ?? ''}:${event.data?.join(',') ?? ''}`;
+              if (seenEvents.has(eventIdentity)) return;
+              seenEvents.add(eventIdentity);
 
               const from = getTransferParticipant(event, 'from');
               const to = getTransferParticipant(event, 'to');
@@ -153,7 +145,7 @@ export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryRe
               }
 
               newItems.push({
-                id: `${event.transaction_hash}_${event.block_number}_${eventIndex}_${type}`,
+                id: `${eventIdentity}:${type}`,
                 type,
                 token,
                 amount: Amount.fromRaw(amountRaw, token),
@@ -164,10 +156,19 @@ export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryRe
             });
 
             continuationToken = eventsResponse.continuation_token;
-          } while (continuationToken);
+            eventPagesFetched += 1;
+          } while (
+            continuationToken &&
+            eventPagesFetched < MAX_EVENT_PAGES_PER_TOKEN_PER_WINDOW &&
+            newItems.length < targetItemCount
+          );
+
+          if (newItems.length >= targetItemCount) {
+            break;
+          }
         }
 
-        if (newItems.length >= pageSize) {
+        if (newItems.length >= targetItemCount) {
           oldestFetchedBlockRef.current = scanFromBlock > 0 ? scanFromBlock - 1 : -1;
           break;
         }
@@ -197,7 +198,7 @@ export const useHistory = (tokens: Token[], pageSize: number = 20): UseHistoryRe
       setLoading(false);
       setRefreshing(false);
     }
-  }, [wallet, tokenCount, tokenMap, pageSize]);
+  }, [wallet, tokenCount, pageSize, tokens]);
 
   const refresh = useCallback(async () => {
     oldestFetchedBlockRef.current = null;
