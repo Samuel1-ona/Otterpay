@@ -1,9 +1,9 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { StarkZap, WalletInterface, PrivySigner, SignerAdapter, ArgentXV050Preset, ChainId, Tx, fromAddress } from 'starkzap';
+import { StarkZap, WalletInterface, ChainId, Tx } from 'starkzap';
 import { CartridgeWallet } from 'starkzap/cartridge';
-import { hash, CallData, type Call } from 'starknet';
+import { type Call } from 'starknet';
 import { getRpcUrlForNetwork, OtterpayNetwork } from '@/lib/otterpayNetworks';
 
 /**
@@ -18,24 +18,6 @@ type EventPatchable = {
   removeAllListeners?: () => unknown;
 };
 
-type DeployAccountDetails = {
-  version: bigint | number | string;
-  constructorCalldata: unknown;
-  contractAddress: string;
-  classHash: string;
-  addressSalt: string;
-  chainId: string;
-  nonce: string;
-  maxFee?: string | number | bigint;
-};
-
-type RawSignature = string[] | { r: string | bigint; s: string | bigint };
-
-type SignerAdapterWithRawSigner = {
-  signer: {
-    signRaw: (messageHash: string) => Promise<RawSignature>;
-  };
-};
 
 type StarkZapInternals = {
   config: {
@@ -61,41 +43,7 @@ function patchProvider<T extends object | null | undefined>(provider: T): T {
   return provider;
 }
 
-// Monkey-patch PrivySigner prototype
-if (PrivySigner && PrivySigner.prototype) {
-  patchProvider(PrivySigner.prototype);
-}
 
-// Monkey-patch SignerAdapter to support V1 DEPLOY_ACCOUNT (required for sponsored deployments in current SDK)
-if (SignerAdapter && SignerAdapter.prototype) {
-  const signerAdapterPrototype = SignerAdapter.prototype as unknown as {
-    signDeployAccountTransaction: (details: DeployAccountDetails) => Promise<string[]>;
-  };
-  const originalSignDeploy = signerAdapterPrototype.signDeployAccountTransaction;
-  signerAdapterPrototype.signDeployAccountTransaction = async function (
-    this: SignerAdapterWithRawSigner,
-    details: DeployAccountDetails
-  ) {
-    if (BigInt(details.version) === 1n) {
-      const compiledConstructorCalldata = CallData.compile(details.constructorCalldata as never);
-      const msgHash = (hash as unknown as {
-        calculateDeployAccountTransactionHash: (payload: Record<string, unknown>) => string;
-      }).calculateDeployAccountTransactionHash({
-        contractAddress: details.contractAddress,
-        classHash: details.classHash,
-        constructorCalldata: compiledConstructorCalldata,
-        salt: details.addressSalt,
-        version: details.version,
-        chainId: details.chainId,
-        nonce: details.nonce,
-        maxFee: details.maxFee || 0
-      });
-      const txSig = await this.signer.signRaw(msgHash);
-      return Array.isArray(txSig) ? txSig.map(String) : [String(txSig.r), String(txSig.s)];
-    }
-    return originalSignDeploy.call(this as never, details);
-  };
-}
 
 import { useAccount, useConnect } from "@starknet-react/core";
 import { ControllerConnector } from "@cartridge/connector";
@@ -106,7 +54,6 @@ interface StarkZapContextType {
   isLoading: boolean;
   error: Error | null;
   network: OtterpayNetwork;
-  connect: (accessToken: string, userId: string) => Promise<void>;
   connectWithCartridge: () => Promise<void>;
 }
 
@@ -256,56 +203,7 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
     initSdk();
   }, [network, avnuApiKey]);
 
-  const connect = async (accessToken: string, userId: string, accountAddress?: string) => {
-    if (!sdk) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const privy = await fetch('/api/privy/wallet', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({ userId })
-      }).then(r => r.json());
 
-      if (!privy.wallet) throw new Error(privy.error || 'Failed to get Privy wallet');
-      
-      console.log('[StarkZapProvider] Privy Wallet Resolved:', {
-        walletId: privy.wallet.id,
-        publicKey: privy.wallet.publicKey,
-      });
-
-      const signer = new PrivySigner({
-          walletId: privy.wallet.id,
-          publicKey: privy.wallet.publicKey,
-          serverUrl: `${window.location.origin}/api/privy/sign`,
-      });
-
-      const walletInstance = await sdk.connectWallet({
-          account: {
-              signer,
-              accountClass: ArgentXV050Preset,
-          },
-          ...(accountAddress && { accountAddress: fromAddress(accountAddress) }),
-          feeMode: 'sponsored',
-      });
-      
-      const patchedWallet = patchProvider(walletInstance) as WalletInterface;
-      
-      // Auto-deploy if needed (starkzap standard)
-      await patchedWallet.ensureReady({ deploy: 'if_needed' });
-
-      console.log('[StarkZapProvider] Connected Address:', patchedWallet.address);
-      setWallet(patchedWallet);
-    } catch (err) {
-      console.error('Failed to connect wallet:', err);
-      setError(err instanceof Error ? err : new Error('Wallet Connection Failed'));
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const connectWithCartridge = async () => {
     if (!sdk) return;
@@ -332,7 +230,7 @@ export const StarkZapProvider: React.FC<StarkZapProviderProps> = ({
 
   return (
     <StarkZapContext.Provider
-      value={{ sdk, wallet, isLoading, error, network, connect, connectWithCartridge }}
+      value={{ sdk, wallet, isLoading, error, network, connectWithCartridge }}
     >
       {children}
     </StarkZapContext.Provider>
